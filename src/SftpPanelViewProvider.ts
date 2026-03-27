@@ -4,6 +4,7 @@ import { getWebviewLocale } from './i18n';
 
 export class SftpPanelViewProvider implements vscode.WebviewViewProvider {
   private _view?: vscode.WebviewView;
+  private _disposables: vscode.Disposable[] = [];
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
@@ -17,6 +18,10 @@ export class SftpPanelViewProvider implements vscode.WebviewViewProvider {
   ) {
     this._view = webviewView;
 
+    // Dispose previous listeners to avoid duplicate messages
+    this._disposables.forEach(d => d.dispose());
+    this._disposables = [];
+
     webviewView.webview.options = {
       enableScripts: true,
       localResourceRoots: [this._extensionUri],
@@ -25,14 +30,18 @@ export class SftpPanelViewProvider implements vscode.WebviewViewProvider {
     webviewView.webview.html = this._getHtml();
 
     // Forward logs to webview
-    this._conn.onLog.event((msg) => {
-      this._post({ type: 'log', message: msg });
-    });
+    this._disposables.push(
+      this._conn.onLog.event((msg) => {
+        this._post({ type: 'log', message: msg });
+      })
+    );
 
     // Forward status changes
-    this._conn.onStatusChange.event((status) => {
-      this._post({ type: 'statusChange', status });
-    });
+    this._disposables.push(
+      this._conn.onStatusChange.event((status) => {
+        this._post({ type: 'statusChange', status });
+      })
+    );
 
     // Handle messages from webview
     webviewView.webview.onDidReceiveMessage(async (msg) => {

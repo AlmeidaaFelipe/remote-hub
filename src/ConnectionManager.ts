@@ -110,7 +110,7 @@ export class ConnectionManager {
   private async _connectSftp(config: ConnectionConfig): Promise<void> {
     // Dynamic import to avoid bundling issues in dev
     const { Client } = await import('ssh2');
-    return new Promise((resolve, reject) => {
+    return new Promise(async (resolve, reject) => {
       const client = new Client();
       const connConfig: any = {
         host: config.host,
@@ -125,9 +125,29 @@ export class ConnectionManager {
       } else if (config.authType === 'privateKey') {
         const fs = require('fs');
         const keyPath = config.privateKeyPath!.replace('~', require('os').homedir());
-        connConfig.privateKey = fs.readFileSync(keyPath);
+        const keyData = fs.readFileSync(keyPath);
+
+        // Check if the key is encrypted and ask for passphrase
+        const keyStr = keyData.toString('utf8');
+        if (keyStr.includes('ENCRYPTED')) {
+          const vscode = require('vscode');
+          const passphrase = await vscode.window.showInputBox({
+            title: 'SSH Key Passphrase',
+            prompt: `Enter passphrase for ${config.privateKeyPath}`,
+            password: true,
+          });
+          if (!passphrase) {
+            return reject(new Error('Passphrase is required for this encrypted key.'));
+          }
+          connConfig.privateKey = keyData;
+          connConfig.passphrase = passphrase;
+        } else {
+          connConfig.privateKey = keyData;
+        }
       } else {
-        connConfig.agent = process.env.SSH_AUTH_SOCK;
+        connConfig.agent = process.platform === 'win32'
+          ? '\\\\.\\pipe\\openssh-ssh-agent'
+          : process.env.SSH_AUTH_SOCK;
       }
 
       client

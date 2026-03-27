@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial development and testing.
 
+## [1.0.2] - 2026-03-27
+
+### Fixed
+
+- Fixed duplicate log messages in the connection panel.
+
+### Added
+
+- Passphrase support for encrypted SSH private keys.
+- Windows SSH Agent support via OpenSSH named pipe.
+
 ## [1.0.1] - 2026-03-27
 
 ### Changed
