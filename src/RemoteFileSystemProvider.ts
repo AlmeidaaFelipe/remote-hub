@@ -1,0 +1,83 @@
+import * as vscode from 'vscode';
+import { ConnectionManager } from './ConnectionManager';
+import { t } from './i18n';
+
+/**
+ * Provides a virtual `sftp://` URI scheme so VSCode can open remote files
+ * directly in the editor. On save, we upload back automatically.
+ */
+export class RemoteFileSystemProvider implements vscode.FileSystemProvider {
+  private _emitter = new vscode.EventEmitter<vscode.FileChangeEvent[]>();
+  readonly onDidChangeFile: vscode.Event<vscode.FileChangeEvent[]> =
+    this._emitter.event;
+
+  // In-memory cache of file contents
+  private _cache = new Map<string, Uint8Array>();
+
+  constructor(private _conn: ConnectionManager) {}
+
+  watch(): vscode.Disposable {
+    return new vscode.Disposable(() => {});
+  }
+
+  stat(uri: vscode.Uri): vscode.FileStat {
+    return {
+      type: vscode.FileType.File,
+      ctime: Date.now(),
+      mtime: Date.now(),
+      size: this._cache.get(uri.toString())?.byteLength ?? 0,
+    };
+  }
+
+  readDirectory(): [string, vscode.FileType][] {
+    return [];
+  }
+
+  createDirectory(): void {}
+
+  async readFile(uri: vscode.Uri): Promise<Uint8Array> {
+    const cached = this._cache.get(uri.toString());
+    if (cached) return cached;
+
+    const remotePath = uri.path;
+    vscode.window.setStatusBarMessage(t('downloading', remotePath), 3000);
+    const buf = await this._conn.downloadFile(remotePath);
+    const bytes = new Uint8Array(buf);
+    this._cache.set(uri.toString(), bytes);
+    return bytes;
+  }
+
+  async writeFile(
+    uri: vscode.Uri,
+    content: Uint8Array,
+    _options: { create: boolean; overwrite: boolean }
+  ): Promise<void> {
+    this._cache.set(uri.toString(), content);
+    // Actual upload happens in uploadOnSave (triggered by onDidSaveTextDocument)
+  }
+
+  delete(): void {}
+  rename(): void {}
+
+  /** Called by extension.ts on every save of an sftp:// document */
+  async uploadOnSave(doc: vscode.TextDocument): Promise<void> {
+    const remotePath = doc.uri.path;
+    const content = Buffer.from(doc.getText(), 'utf8');
+    this._cache.set(doc.uri.toString(), content);
+
+    try {
+      vscode.window.setStatusBarMessage(t('uploading', remotePath), 2000);
+      await this._conn.uploadFile(remotePath, content);
+      vscode.window.setStatusBarMessage(t('uploaded', remotePath), 3000);
+    } catch (err: any) {
+      vscode.window.showErrorMessage(t('upload.failed', err.message));
+    }
+  }
+
+  /** Open a remote file in the VSCode editor */
+  async openRemoteFile(remotePath: string): Promise<void> {
+    const uri = vscode.Uri.parse(`sftp://${remotePath}`);
+    const doc = await vscode.workspace.openTextDocument(uri);
+    await vscode.window.showTextDocument(doc, { preview: false });
+  }
+}

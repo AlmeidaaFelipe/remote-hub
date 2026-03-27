@@ -1,0 +1,20 @@
+{
+  "remotehub.displayName": "Remote Hub",
+  "remotehub.description": "Connect to remote servers via SSH, SFTP, FTP or FTPS and edit files directly",
+  "remotehub.view.main": "Remote Hub",
+  "remotehub.view.connections": "Connections",
+  "remotehub.view.explorer": "Explorer",
+  "remotehub.command.connect": "Remote Hub: Connect",
+  "remotehub.command.disconnect": "Remote Hub: Disconnect",
+  "remotehub.command.refreshExplorer": "Remote Hub: Refresh Explorer",
+  "remotehub.command.deleteSaved": "Delete",
+  "remotehub.command.openRemoteFile": "Remote Hub: Open Remote File",
+  "remotehub.command.newFile": "New File",
+  "remotehub.command.newFolder": "New Folder",
+  "remotehub.command.copyPath": "Copy Path",
+  "remotehub.command.rename": "Rename",
+  "remotehub.command.delete": "Delete",
+  "remotehub.command.goToConnections": "Connections",
+  "remotehub.command.goToExplorer": "Explorer",
+  "remotehub.command.stopConnection": "Stop Connection"
+}

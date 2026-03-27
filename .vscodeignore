@@ -1,0 +1,10 @@
+.vscode/**
+.vscode-test/**
+src/**
+!src/media/**
+.gitignore
+tsconfig.json
+**/*.map
+node_modules/.bin
+node_modules/typescript
+node_modules/@types

@@ -1,0 +1,197 @@
+{
+  "name": "remote-hub",
+  "displayName": "%remotehub.displayName%",
+  "description": "%remotehub.description%",
+  "version": "1.0.1",
+  "publisher": "AlmeidaaFelipe",
+  "icon": "icon.png",
+  "author": "Felipe Almeida",
+  "homepage": "https://almeidafelipe.com",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AlmeidaaFelipe/remote-hub.git"
+  },
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "sftp-panel",
+          "title": "%remotehub.view.main%",
+          "icon": "src/media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "sftp-panel": [
+        {
+          "type": "webview",
+          "id": "sftpPanel.mainView",
+          "name": "%remotehub.view.connections%",
+          "when": "!sftpPanel.connected || sftpPanel.showConnections"
+        },
+        {
+          "type": "tree",
+          "id": "sftpPanel.explorerView",
+          "name": "%remotehub.view.explorer%",
+          "when": "sftpPanel.connected && !sftpPanel.showConnections"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "sftpPanel.connect",
+        "title": "%remotehub.command.connect%"
+      },
+      {
+        "command": "sftpPanel.disconnect",
+        "title": "%remotehub.command.disconnect%"
+      },
+      {
+        "command": "sftpPanel.refreshExplorer",
+        "title": "%remotehub.command.refreshExplorer%",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "sftpPanel.deleteSavedConnectionFromContext",
+        "title": "%remotehub.command.deleteSaved%"
+      },
+      {
+        "command": "sftpPanel.openRemoteFile",
+        "title": "%remotehub.command.openRemoteFile%"
+      },
+      {
+        "command": "sftpPanel.createRemoteFile",
+        "title": "%remotehub.command.newFile%",
+        "icon": "$(new-file)"
+      },
+      {
+        "command": "sftpPanel.createRemoteFolder",
+        "title": "%remotehub.command.newFolder%",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "sftpPanel.copyRemotePath",
+        "title": "%remotehub.command.copyPath%"
+      },
+      {
+        "command": "sftpPanel.renameRemoteEntry",
+        "title": "%remotehub.command.rename%"
+      },
+      {
+        "command": "sftpPanel.deleteRemoteEntry",
+        "title": "%remotehub.command.delete%"
+      },
+      {
+        "command": "sftpPanel.goToConnections",
+        "title": "%remotehub.command.goToConnections%",
+        "icon": "$(arrow-left)"
+      },
+      {
+        "command": "sftpPanel.goToExplorer",
+        "title": "%remotehub.command.goToExplorer%",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "sftpPanel.stopConnection",
+        "title": "%remotehub.command.stopConnection%",
+        "icon": "$(debug-stop)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "sftpPanel.goToConnections",
+          "when": "view == sftpPanel.explorerView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "sftpPanel.stopConnection",
+          "when": "view == sftpPanel.explorerView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "sftpPanel.goToExplorer",
+          "when": "view == sftpPanel.mainView && sftpPanel.connected",
+          "group": "navigation@1"
+        },
+        {
+          "command": "sftpPanel.stopConnection",
+          "when": "view == sftpPanel.mainView && sftpPanel.connected",
+          "group": "navigation@2"
+        },
+        {
+          "command": "sftpPanel.refreshExplorer",
+          "when": "view == sftpPanel.explorerView",
+          "group": "navigation@3"
+        }
+      ],
+      "webview/context": [
+        {
+          "command": "sftpPanel.deleteSavedConnectionFromContext",
+          "when": "webviewId == 'sftpPanel.mainView' && webviewSection == 'savedConnection'"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "sftpPanel.createRemoteFile",
+          "when": "view == sftpPanel.explorerView && viewItem == remoteConnectionRoot",
+          "group": "inline@1"
+        },
+        {
+          "command": "sftpPanel.createRemoteFolder",
+          "when": "view == sftpPanel.explorerView && viewItem == remoteConnectionRoot",
+          "group": "inline@2"
+        },
+        {
+          "command": "sftpPanel.createRemoteFile",
+          "when": "view == sftpPanel.explorerView && (viewItem == remoteConnectionRoot || viewItem == remoteDirectory || viewItem == remoteFile)",
+          "group": "1_modification@1"
+        },
+        {
+          "command": "sftpPanel.createRemoteFolder",
+          "when": "view == sftpPanel.explorerView && (viewItem == remoteConnectionRoot || viewItem == remoteDirectory || viewItem == remoteFile)",
+          "group": "1_modification@2"
+        },
+        {
+          "command": "sftpPanel.copyRemotePath",
+          "when": "view == sftpPanel.explorerView && (viewItem == remoteDirectory || viewItem == remoteFile)",
+          "group": "2_workspace@1"
+        },
+        {
+          "command": "sftpPanel.renameRemoteEntry",
+          "when": "view == sftpPanel.explorerView && (viewItem == remoteDirectory || viewItem == remoteFile)",
+          "group": "2_workspace@2"
+        },
+        {
+          "command": "sftpPanel.deleteRemoteEntry",
+          "when": "view == sftpPanel.explorerView && (viewItem == remoteDirectory || viewItem == remoteFile)",
+          "group": "2_workspace@3"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/ssh2": "^1.15.5",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "basic-ftp": "^5.0.5",
+    "ssh2": "^1.15.0"
+  }
+}
