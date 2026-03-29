@@ -2,7 +2,7 @@
   "name": "remote-hub",
   "displayName": "%remotehub.displayName%",
   "description": "%remotehub.description%",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "publisher": "AlmeidaaFelipe",
   "icon": "icon.png",
   "author": "Felipe Almeida",
@@ -182,7 +182,9 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "lint": "eslint src --ext ts"
+    "lint": "eslint src --ext ts",
+    "dev-compile": "tools\\dev-ovsx.bat",
+    "pub": "tools\\ovsx.bat"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

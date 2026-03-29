@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { ConnectionManager } from './ConnectionManager';
 import { t } from './i18n';
 
@@ -40,8 +41,22 @@ export class RemoteFileSystemProvider implements vscode.FileSystemProvider {
     if (cached) return cached;
 
     const remotePath = uri.path;
-    vscode.window.setStatusBarMessage(t('downloading', remotePath), 3000);
-    const buf = await this._conn.downloadFile(remotePath);
+    const fileName = path.posix.basename(remotePath);
+
+    const buf = await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: t('progress.downloading', fileName),
+        cancellable: false,
+      },
+      async (progress) => {
+        progress.report({ increment: 0 });
+        const result = await this._conn.downloadFile(remotePath);
+        progress.report({ increment: 100 });
+        return result;
+      }
+    );
+
     const bytes = new Uint8Array(buf);
     this._cache.set(uri.toString(), bytes);
     return bytes;
@@ -62,13 +77,24 @@ export class RemoteFileSystemProvider implements vscode.FileSystemProvider {
   /** Called by extension.ts on every save of an sftp:// document */
   async uploadOnSave(doc: vscode.TextDocument): Promise<void> {
     const remotePath = doc.uri.path;
+    const fileName = path.posix.basename(remotePath);
     const content = Buffer.from(doc.getText(), 'utf8');
     this._cache.set(doc.uri.toString(), content);
 
     try {
-      vscode.window.setStatusBarMessage(t('uploading', remotePath), 2000);
-      await this._conn.uploadFile(remotePath, content);
-      vscode.window.setStatusBarMessage(t('uploaded', remotePath), 3000);
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: t('progress.uploading', fileName),
+          cancellable: false,
+        },
+        async (progress) => {
+          progress.report({ increment: 0 });
+          await this._conn.uploadFile(remotePath, content);
+          progress.report({ increment: 100 });
+        }
+      );
+      vscode.window.setStatusBarMessage(t('uploaded', fileName), 3000);
     } catch (err: any) {
       vscode.window.showErrorMessage(t('upload.failed', err.message));
     }

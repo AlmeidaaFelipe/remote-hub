@@ -70,6 +70,17 @@ export class SftpPanelViewProvider implements vscode.WebviewViewProvider {
           });
           break;
         }
+
+        case 'checkStoredPassword': {
+          const config = msg.config as ConnectionConfig;
+          const stored = await this._conn.getStoredPassword(config);
+          this._post({
+            type: 'storedPasswordResult',
+            label: config.label,
+            hasPassword: !!stored,
+          });
+          break;
+        }
       }
     });
 
@@ -319,6 +330,10 @@ export class SftpPanelViewProvider implements vscode.WebviewViewProvider {
       <div class="field" id="f-pass-wrap">
         <label>${l['wv.password']}</label>
         <input id="f-pass" type="password" placeholder="••••••••"/>
+        <div style="display:flex;align-items:center;gap:4px;margin-top:4px">
+          <input id="f-save-pass" type="checkbox" style="width:auto;margin:0"/>
+          <label for="f-save-pass" style="opacity:0.7;cursor:pointer">${l['wv.savePassword']}</label>
+        </div>
       </div>
       <div class="field" id="f-key-wrap" style="display:none">
         <label>${l['wv.privateKey']}</label>
@@ -391,6 +406,7 @@ function doConnect(prefill) {
     password:       document.getElementById('f-pass').value,
     privateKeyPath: document.getElementById('f-key').value,
     remotePath:     document.getElementById('f-path').value || '/',
+    savePassword:   document.getElementById('f-save-pass').checked,
   };
   if (!config.host) { appendLog('✗ ' + i18n['wv.hostRequired'], 'err'); return; }
   vscode.postMessage({ type: 'connect', config });
@@ -449,6 +465,7 @@ function fillSavedConnectionForm(c) {
   document.getElementById('f-auth').value  = c.authType;
   document.getElementById('f-path').value  = c.remotePath;
   document.getElementById('f-key').value   = c.privateKeyPath || '';
+  document.getElementById('f-save-pass').checked = !!c.savePassword;
   updateAuthFields();
   
   // Expand new connection section to show the filled form
@@ -460,10 +477,9 @@ function loadSavedByIndex(index) {
   const c = savedConnections[index];
   if (!c) return;
   fillSavedConnectionForm(c);
-  // Keep current behavior when clicking the row: only prefill (or ask for password focus)
   if (c.authType === 'password') {
-    document.getElementById('f-pass').focus();
-    appendLog('ℹ️ ' + i18n['wv.passwordRequired'].replace('{0}', c.label || c.host), '');
+    // Ask backend if there's a stored password for this connection
+    vscode.postMessage({ type: 'checkStoredPassword', config: c });
   }
 }
 
@@ -471,16 +487,13 @@ function connectSavedByIndex(index) {
   const c = savedConnections[index];
   if (!c) return;
   fillSavedConnectionForm(c);
-  const config = { ...c };
+  const config = { ...c, savePassword: document.getElementById('f-save-pass').checked };
   if (config.authType === 'password') {
     const password = document.getElementById('f-pass').value;
-    if (!password) {
-      appendLog('✗ ' + i18n['wv.enterPassword'].replace('{0}', config.label || config.host), 'err');
-      const passEl = document.getElementById('f-pass');
-      if (passEl) passEl.focus();
-      return;
+    if (password) {
+      config.password = password;
     }
-    config.password = password;
+    // If no password typed, the backend will try SecretStorage
   }
   doConnect(config);
 }
@@ -541,6 +554,16 @@ window.addEventListener('message', e => {
 
     case 'savedConnections':
       renderSaved(msg.connections);
+      break;
+
+    case 'storedPasswordResult':
+      if (msg.hasPassword) {
+        document.getElementById('f-save-pass').checked = true;
+        appendLog('🔐 ' + (i18n['wv.savedPasswordFound'] || 'Saved password found for ' + msg.label + '. Click Connect.'), 'ok');
+      } else {
+        document.getElementById('f-pass').focus();
+        appendLog('ℹ️ ' + i18n['wv.passwordRequired'].replace('{0}', msg.label), '');
+      }
       break;
 
     case 'error':

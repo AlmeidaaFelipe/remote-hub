@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { SshConfigParser } from './SshConfigParser';
 
 export interface ConnectionConfig {
   label: string;
@@ -11,6 +12,7 @@ export interface ConnectionConfig {
   password?: string;
   privateKeyPath?: string;
   remotePath: string;
+  savePassword?: boolean;
 }
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
@@ -20,7 +22,7 @@ export class ConnectionManager {
   private _status: ConnectionStatus = 'disconnected';
   private _config: ConnectionConfig | null = null;
   private _context: vscode.ExtensionContext;
-  private _passwordCache = new Map<string, string>();
+  private _secrets: vscode.SecretStorage;
   private _operationQueue: Promise<void> = Promise.resolve();
 
   readonly onStatusChange = new vscode.EventEmitter<ConnectionStatus>();
@@ -28,6 +30,7 @@ export class ConnectionManager {
 
   constructor(context: vscode.ExtensionContext) {
     this._context = context;
+    this._secrets = context.secrets;
   }
 
   get status(): ConnectionStatus {
@@ -50,19 +53,36 @@ export class ConnectionManager {
     const saved = this.getSavedConnections();
     const idx = saved.findIndex((c) => c.label === config.label);
     const toSave = { ...config };
-    delete toSave.password; // Never persist passwords
+    delete toSave.password; // Never persist passwords in globalState
     if (idx >= 0) {
       saved[idx] = toSave;
     } else {
       saved.unshift(toSave);
     }
     await this._context.globalState.update('savedConnections', saved.slice(0, 10));
+
+    // Store password securely via SecretStorage if user opted in
+    if (config.savePassword && config.authType === 'password' && config.password) {
+      const secretKey = this._makeSecretKey(config);
+      await this._secrets.store(secretKey, config.password);
+    }
   }
 
   async deleteConnection(label: string): Promise<void> {
     const saved = this.getSavedConnections();
+    const conn = saved.find(c => c.label === label);
+    if (conn) {
+      const secretKey = this._makeSecretKey(conn);
+      await this._secrets.delete(secretKey);
+    }
     const filtered = saved.filter(c => c.label !== label);
     await this._context.globalState.update('savedConnections', filtered);
+  }
+
+  /** Retrieve a stored password from SecretStorage */
+  async getStoredPassword(config: ConnectionConfig): Promise<string | undefined> {
+    const secretKey = this._makeSecretKey(config);
+    return this._secrets.get(secretKey);
   }
 
   async connect(config: ConnectionConfig): Promise<void> {
@@ -72,12 +92,34 @@ export class ConnectionManager {
     }
 
     const effectiveConfig: ConnectionConfig = { ...config };
-    const cacheKey = this._makePasswordCacheKey(effectiveConfig);
+
+    if (this._isSshLikeProtocol(effectiveConfig.protocol)) {
+      try {
+        const sshResolved = SshConfigParser.resolve(effectiveConfig.host);
+        if (sshResolved) {
+          if (sshResolved.HostName) effectiveConfig.host = sshResolved.HostName;
+          if (sshResolved.User && !effectiveConfig.username) effectiveConfig.username = sshResolved.User;
+          // Only override default port
+          if (sshResolved.Port && effectiveConfig.port === 22) effectiveConfig.port = sshResolved.Port;
+          if (sshResolved.IdentityFile && sshResolved.IdentityFile.length > 0 && (!effectiveConfig.privateKeyPath || effectiveConfig.privateKeyPath === '~/.ssh/id_rsa')) {
+            effectiveConfig.privateKeyPath = sshResolved.IdentityFile[0];
+            if (effectiveConfig.authType === 'password' && !effectiveConfig.password) {
+              effectiveConfig.authType = 'privateKey';
+            }
+          }
+        }
+      } catch (e: any) {
+        this._log(`⚠️ Failed to read ~/.ssh/config: ${e.message || e}`);
+      }
+    }
+
+    // Try to retrieve password from SecretStorage if not provided
     if (effectiveConfig.authType === 'password' && !effectiveConfig.password) {
-      const cachedPassword = this._passwordCache.get(cacheKey);
-      if (cachedPassword) {
-        effectiveConfig.password = cachedPassword;
-        this._log(`Using cached password for ${effectiveConfig.username}@${effectiveConfig.host}.`);
+      const storedPassword = await this.getStoredPassword(effectiveConfig);
+      if (storedPassword) {
+        effectiveConfig.password = storedPassword;
+        effectiveConfig.savePassword = true;
+        this._log(`Using saved password for ${effectiveConfig.username}@${effectiveConfig.host}.`);
       }
     }
     if (effectiveConfig.authType === 'password' && !effectiveConfig.password) {
@@ -97,9 +139,6 @@ export class ConnectionManager {
       this._setStatus('connected');
       this._log(`✓ Connected successfully as ${effectiveConfig.username}`);
       await this.saveConnection(effectiveConfig);
-      if (effectiveConfig.authType === 'password' && effectiveConfig.password) {
-        this._passwordCache.set(cacheKey, effectiveConfig.password);
-      }
     } catch (err: any) {
       this._setStatus('error');
       this._log(`✗ Connection failed: ${err.message}`);
@@ -340,10 +379,6 @@ export class ConnectionManager {
         this._client?.close();
       }
     } catch (_) {}
-    if (this._config?.authType === 'password') {
-      const key = this._makePasswordCacheKey(this._config);
-      this._passwordCache.delete(key);
-    }
     this._client = null;
     this._config = null;
     this._setStatus('disconnected');
@@ -365,14 +400,8 @@ export class ConnectionManager {
     return protocol === 'ssh' || protocol === 'sftp';
   }
 
-  private _makePasswordCacheKey(config: ConnectionConfig): string {
-    return [
-      config.label,
-      config.protocol,
-      config.host,
-      config.port,
-      config.username,
-    ].join('|');
+  private _makeSecretKey(config: ConnectionConfig): string {
+    return `remotehub:${config.protocol}://${config.username}@${config.host}:${config.port}`;
   }
 
   private _enqueue<T>(operation: () => Promise<T>): Promise<T> {
@@ -422,11 +451,10 @@ export class ConnectionManager {
     }
 
     const cfg: ConnectionConfig = { ...this._config };
-    const cacheKey = this._makePasswordCacheKey(cfg);
     if (cfg.authType === 'password' && !cfg.password) {
-      const cachedPassword = this._passwordCache.get(cacheKey);
-      if (cachedPassword) {
-        cfg.password = cachedPassword;
+      const storedPassword = await this.getStoredPassword(cfg);
+      if (storedPassword) {
+        cfg.password = storedPassword;
       }
     }
     if (cfg.authType === 'password' && !cfg.password) {

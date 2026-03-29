@@ -41,6 +41,7 @@ export class RemoteExplorerProvider implements vscode.TreeDataProvider<RemoteExp
         vscode.TreeItemCollapsibleState.Expanded
       );
       item.tooltip = element.remotePath;
+      item.iconPath = new vscode.ThemeIcon('remote');
       item.contextValue = 'remoteConnectionRoot';
       return item;
     }
@@ -51,8 +52,8 @@ export class RemoteExplorerProvider implements vscode.TreeDataProvider<RemoteExp
       entry.isDirectory ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None
     );
     item.tooltip = entry.fullPath;
+    // resourceUri lets VS Code resolve icons from the active file icon theme
     item.resourceUri = vscode.Uri.parse(`sftp://${entry.fullPath}`);
-    item.iconPath = entry.isDirectory ? vscode.ThemeIcon.Folder : vscode.ThemeIcon.File;
     item.contextValue = entry.isDirectory ? 'remoteDirectory' : 'remoteFile';
 
     if (element.type === 'file') {

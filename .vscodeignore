@@ -3,6 +3,7 @@
 src/**
 !src/media/**
 .gitignore
+tools/**
 tsconfig.json
 **/*.map
 node_modules/.bin

@@ -27,6 +27,8 @@ const en: Dictionary = {
     'downloading': '$(sync~spin) Downloading {0}...',
     'uploading': '$(cloud-upload) Uploading {0}...',
     'uploaded': '$(check) Uploaded {0}',
+    'progress.downloading': 'Downloading {0}...',
+    'progress.uploading': 'Uploading {0}...',
 
     // Webview strings
     'wv.savedConnections': 'Saved Connections',
@@ -48,7 +50,9 @@ const en: Dictionary = {
     'wv.statusError': 'Error',
     'wv.hostRequired': 'Host is required',
     'wv.passwordRequired': 'Password required to connect to {0}',
-    'wv.enterPassword': 'Please enter the password to connect to {0}.'
+    'wv.enterPassword': 'Please enter the password to connect to {0}.',
+    'wv.savePassword': 'Save password (encrypted)',
+    'wv.savedPasswordFound': 'Saved password found for {0}. Click Connect.',
 };
 
 const pt: Dictionary = {
@@ -74,6 +78,8 @@ const pt: Dictionary = {
     'downloading': '$(sync~spin) Baixando {0}...',
     'uploading': '$(cloud-upload) Enviando {0}...',
     'uploaded': '$(check) Enviado {0}',
+    'progress.downloading': 'Baixando {0}...',
+    'progress.uploading': 'Enviando {0}...',
 
     // Webview strings
     'wv.savedConnections': 'Conexões Salvas',
@@ -95,7 +101,9 @@ const pt: Dictionary = {
     'wv.statusError': 'Erro',
     'wv.hostRequired': 'O host é obrigatório',
     'wv.passwordRequired': 'Senha necessária para conectar em {0}',
-    'wv.enterPassword': 'Informe a senha no campo Password para conectar em {0}.'
+    'wv.enterPassword': 'Informe a senha no campo Password para conectar em {0}.',
+    'wv.savePassword': 'Salvar senha (criptografada)',
+    'wv.savedPasswordFound': 'Senha salva encontrada para {0}. Clique em Conectar.',
 };
 
 export function t(key: string, ...args: any[]): string {

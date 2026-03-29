@@ -101,9 +101,9 @@ ftps
 
 Remote Hub supports multiple authentication methods:
 
-- **Password**: Cached in memory during the editor session. Passwords are not persisted to disk.
-- **Private Key Path**: Connect using a secure private key file.
-- **SSH Agent**: Seamless authentication for SSH/SFTP protocols.
+- **Password**: Optionally saved via VS Code's SecretStorage API (OS-level encrypted keychain). When "Save password" is checked, your credentials are stored securely between sessions. Otherwise, the password is only kept in memory for the current session.
+- **Private Key Path**: Connect using a secure private key file. Supports encrypted keys with passphrase prompt.
+- **SSH Agent**: Seamless authentication for SSH/SFTP protocols. Works on Linux, macOS, and Windows (OpenSSH).
 
 ## Usage
 
@@ -128,6 +128,10 @@ Right-click context menu on tree items includes:
 - Rename
 - Delete
 
+### File Icons
+
+Remote Hub respects your active file icon theme. If you have an icon theme installed (e.g., **Material Icon Theme**, **vscode-icons**), the remote Explorer will display the correct icons for each file type automatically.
+
 ### Auto Upload
 
 Remote Hub listens to editor save events and uploads edited remote files automatically.
@@ -137,8 +141,8 @@ Remote Hub listens to editor save events and uploads edited remote files automat
 1. Open remote file (`sftp://...`)
 2. Edit in editor
 3. Save (`Ctrl+S` or Auto Save)
-4. A debounced upload runs in the background to avoid excessive network operations
-5. Status/log is updated automatically
+4. A progress notification appears while the upload runs in the background
+5. Status bar confirms completion
 
 ## Internationalization
 
@@ -184,5 +188,4 @@ npm run watch
 
 - Drag and drop upload/download
 - Multi-connection simultaneous sessions
-- SSH config alias mapping (`~/.ssh/config`)
 - Better file operation feedback and progress UI
