@@ -189,3 +189,9 @@ npm run watch
 - Drag and drop upload/download
 - Multi-connection simultaneous sessions
 - Better file operation feedback and progress UI
+
+## Links
+
+- [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=AlmeidaaFelipe.remote-hub)
+- [Open VSX Registry](https://open-vsx.org/extension/AlmeidaaFelipe/remote-hub)
+- [GitHub Repository](https://github.com/AlmeidaaFelipe/remote-hub)

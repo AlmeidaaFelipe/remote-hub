@@ -7,11 +7,25 @@
   "icon": "icon.png",
   "author": "Felipe Almeida",
   "homepage": "https://almeidafelipe.com",
+  "bugs": {
+    "url": "https://github.com/AlmeidaaFelipe/remote-hub/issues"
+  },
+  "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": [
     "Other"
+  ],
+  "keywords": [
+    "sftp",
+    "ftp",
+    "ftps",
+    "ssh",
+    "remote",
+    "sync",
+    "deployment",
+    "file transfer"
   ],
   "repository": {
     "type": "git",
@@ -35,12 +49,14 @@
           "type": "webview",
           "id": "sftpPanel.mainView",
           "name": "%remotehub.view.connections%",
+          "icon": "src/media/icon.svg",
           "when": "!sftpPanel.connected || sftpPanel.showConnections"
         },
         {
           "type": "tree",
           "id": "sftpPanel.explorerView",
           "name": "%remotehub.view.explorer%",
+          "icon": "src/media/icon.svg",
           "when": "sftpPanel.connected && !sftpPanel.showConnections"
         }
       ]
