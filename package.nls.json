@@ -16,5 +16,6 @@
   "remotehub.command.delete": "Delete",
   "remotehub.command.goToConnections": "Connections",
   "remotehub.command.goToExplorer": "Explorer",
-  "remotehub.command.stopConnection": "Stop Connection"
+  "remotehub.command.stopConnection": "Stop Connection",
+  "remotehub.command.searchRemote": "Search Remote"
 }

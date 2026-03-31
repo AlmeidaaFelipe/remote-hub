@@ -4,6 +4,7 @@ import { SftpPanelViewProvider } from './SftpPanelViewProvider';
 import { RemoteFileSystemProvider } from './RemoteFileSystemProvider';
 import { ConnectionManager } from './ConnectionManager';
 import { RemoteExplorerNode, RemoteExplorerProvider } from './RemoteExplorerProvider';
+import { OriginalContentProvider, RemoteQuickDiffProvider, openDiffForFile } from './DiffProvider';
 import { t } from './i18n';
 
 let connectionManager: ConnectionManager;
@@ -24,7 +25,8 @@ export function activate(context: vscode.ExtensionContext) {
   } catch (_) {}
 
   connectionManager = new ConnectionManager(context);
-  remoteFs = new RemoteFileSystemProvider(connectionManager);
+  const originalProvider = new OriginalContentProvider();
+  remoteFs = new RemoteFileSystemProvider(connectionManager, originalProvider);
   setCtx('sftpPanel.connected', false);
   setCtx('sftpPanel.showConnections', true);
 
@@ -34,6 +36,16 @@ export function activate(context: vscode.ExtensionContext) {
       isCaseSensitive: true,
     })
   );
+
+  // Register the read-only original content provider for diffs
+  context.subscriptions.push(
+    vscode.workspace.registerTextDocumentContentProvider('sftp-original', originalProvider)
+  );
+
+  // Register Source Control with QuickDiffProvider for inline gutter diffs
+  const scm = vscode.scm.createSourceControl('remoteHub', t('diff.remoteHub'));
+  scm.quickDiffProvider = new RemoteQuickDiffProvider();
+  context.subscriptions.push(scm);
 
   // Register the sidebar webview
   const provider = new SftpPanelViewProvider(
@@ -48,6 +60,7 @@ export function activate(context: vscode.ExtensionContext) {
   const remoteExplorerView = vscode.window.createTreeView('sftpPanel.explorerView', {
     treeDataProvider: remoteExplorerProvider,
     showCollapseAll: true,
+    dragAndDropController: remoteExplorerProvider,
   });
   context.subscriptions.push(remoteExplorerView);
 
@@ -80,6 +93,95 @@ export function activate(context: vscode.ExtensionContext) {
     }),
     vscode.commands.registerCommand('sftpPanel.refreshExplorer', () => {
       remoteExplorerProvider.refresh();
+    }),
+    vscode.commands.registerCommand('sftpPanel.searchRemote', async (node?: RemoteExplorerNode) => {
+      if (connectionManager.status !== 'connected' || !connectionManager.config) {
+        vscode.window.showWarningMessage(t('connect.first'));
+        return;
+      }
+      if (connectionManager.config.protocol !== 'ssh' && connectionManager.config.protocol !== 'sftp') {
+        vscode.window.showWarningMessage(t('search.sshOnly'));
+        return;
+      }
+
+      const selectedNode = remoteExplorerView.selection?.[0];
+      const effectiveNode =
+        (!node || node.type === 'connectionRoot') && selectedNode
+          ? selectedNode
+          : node;
+      const targetDir = remoteExplorerProvider.getTargetDirectory(effectiveNode) || '/';
+
+      const searchTerm = await vscode.window.showInputBox({
+        title: t('search.title'),
+        prompt: t('search.prompt', targetDir),
+        placeHolder: t('search.placeholder'),
+      });
+
+      if (!searchTerm) return;
+
+      try {
+        const resultsStr = await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: t('progress.searching', searchTerm),
+            cancellable: false,
+          },
+          async () => {
+            // grep: recursive, line number, ignore binary.
+            // Escape search term properly to avoid shell injection via single quotes
+            const safeSearchTerm = searchTerm.replace(/'/g, "'\\''");
+            const command = `grep -rnI --exclude-dir=node_modules -e '${safeSearchTerm}' '${targetDir}'`;
+            return await connectionManager.execCommand(command);
+          }
+        );
+
+        const lines = resultsStr.split('\n').filter(l => l.trim().length > 0);
+        if (lines.length === 0) {
+          vscode.window.showInformationMessage(t('search.noResults'));
+          return;
+        }
+
+        interface SearchQuickPickItem extends vscode.QuickPickItem {
+          filePath?: string;
+          lineNumber?: number;
+        }
+
+        const items: SearchQuickPickItem[] = lines.map(line => {
+          // grep output format: filepath:line:content
+          const match = line.match(/^([^:]+):(\d+):(.*)$/);
+          if (match) {
+            return {
+              label: path.posix.basename(match[1]),
+              description: `Line ${match[2]} in ${path.posix.dirname(match[1])}`,
+              detail: match[3].trim(),
+              filePath: match[1],
+              lineNumber: parseInt(match[2], 10),
+            };
+          }
+          return { label: line };
+        });
+
+        const selected = await vscode.window.showQuickPick<SearchQuickPickItem>(items, {
+          title: t('search.resultsTitle', items.length),
+          matchOnDescription: true,
+          matchOnDetail: true,
+        });
+
+        if (selected && selected.filePath && selected.lineNumber !== undefined) {
+          await vscode.commands.executeCommand('sftpPanel.openRemoteFile', selected.filePath);
+          // Wait slightly to ensure document is active before scrolling
+          setTimeout(() => {
+            const editor = vscode.window.activeTextEditor;
+            if (editor && editor.document.uri.path === selected.filePath) {
+              const pos = new vscode.Position(selected.lineNumber! - 1, 0);
+              editor.selection = new vscode.Selection(pos, pos);
+              editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
+            }
+          }, 200);
+        }
+      } catch (err: any) {
+        vscode.window.showErrorMessage(t('search.error', err.message || err));
+      }
     }),
     vscode.commands.registerCommand('sftpPanel.openRemoteFile', async (remotePath?: string) => {
       if (!remotePath) return;
@@ -178,8 +280,22 @@ export function activate(context: vscode.ExtensionContext) {
         t('btn.delete')
       );
       if (answer !== t('btn.delete')) return;
-      await connectionManager.deletePath(node.remotePath, node.type === 'directory');
-      remoteExplorerProvider.refresh();
+
+      try {
+        await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: `Deleting ${label}...`,
+            cancellable: false,
+          },
+          async () => {
+            await connectionManager.deletePath(node.remotePath, node.type === 'directory');
+          }
+        );
+        remoteExplorerProvider.refresh();
+      } catch (err: any) {
+        vscode.window.showErrorMessage(`Failed to delete ${label}: ${err.message || err}`);
+      }
     }),
     vscode.commands.registerCommand('sftpPanel.deleteSavedConnectionFromContext', async (ctx?: any) => {
       const label =
@@ -197,6 +313,20 @@ export function activate(context: vscode.ExtensionContext) {
       if (answer !== t('btn.delete')) return;
       await connectionManager.deleteConnection(label);
       provider.refreshSavedConnections();
+    }),
+    vscode.commands.registerCommand('sftpPanel.diffWithRemote', async (node?: RemoteExplorerNode) => {
+      // If called from a tree view item
+      if (node && node.type === 'file') {
+        await openDiffForFile(node.remotePath, connectionManager, originalProvider);
+        return;
+      }
+      // If called without context, try the active editor
+      const activeEditor = vscode.window.activeTextEditor;
+      if (activeEditor && activeEditor.document.uri.scheme === 'sftp') {
+        await openDiffForFile(activeEditor.document.uri.path, connectionManager, originalProvider);
+        return;
+      }
+      vscode.window.showWarningMessage(t('diff.noFile'));
     })
   );
 
@@ -212,6 +342,7 @@ export function activate(context: vscode.ExtensionContext) {
       setCtx('sftpPanel.connected', false);
       setCtx('sftpPanel.showConnections', true);
       remoteExplorerProvider.refresh();
+      originalProvider.clearAll();
     }
   });
 

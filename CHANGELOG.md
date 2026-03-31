@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial development and testing.
 
+## [1.0.4] - 2026-03-31
+
+### Added
+
+- **Inline Diff (Automatic)**: Remote files now show automatic inline diff decorations in the editor gutter — green for added lines, red for removed, blue for modified — just like Git. Powered by VS Code's native QuickDiffProvider.
+- **Compare with Remote**: Right-click any remote file in the Explorer and select "Compare with Remote" to open a side-by-side diff view comparing the server version with your local edits.
+- **Drag & Drop Upload/Move**: You can now drag and drop files from your computer directly into the Remote Hub explorer to upload them, or drag files within the remote tree to move them. Includes native VS Code progress notifications during upload.
+- **Remote Search (SSH/SFTP)**: Added a "Search Remote" button. Easily find text across your remote server files instantly using native server commands without downloading the files first. Click a result to jump directly to that line.
+
+### Fixed
+
+- **File Deletion Bug on SSH**: Fixed an issue where deleting files while connected via pure SSH would fail with a `this._client.remove is not a function` error.
+
 ## [1.0.3] - 2026-03-29
 
 ### Added

@@ -2,7 +2,7 @@
   "name": "remote-hub",
   "displayName": "%remotehub.displayName%",
   "description": "%remotehub.description%",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "publisher": "AlmeidaaFelipe",
   "icon": "icon.png",
   "author": "Felipe Almeida",
@@ -119,6 +119,16 @@
         "command": "sftpPanel.stopConnection",
         "title": "%remotehub.command.stopConnection%",
         "icon": "$(debug-stop)"
+      },
+      {
+        "command": "sftpPanel.diffWithRemote",
+        "title": "Compare with Remote",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "sftpPanel.searchRemote",
+        "title": "%remotehub.command.searchRemote%",
+        "icon": "$(search)"
       }
     ],
     "menus": {
@@ -144,9 +154,14 @@
           "group": "navigation@2"
         },
         {
-          "command": "sftpPanel.refreshExplorer",
+          "command": "sftpPanel.searchRemote",
           "when": "view == sftpPanel.explorerView",
           "group": "navigation@3"
+        },
+        {
+          "command": "sftpPanel.refreshExplorer",
+          "when": "view == sftpPanel.explorerView",
+          "group": "navigation@4"
         }
       ],
       "webview/context": [
@@ -190,6 +205,16 @@
           "command": "sftpPanel.deleteRemoteEntry",
           "when": "view == sftpPanel.explorerView && (viewItem == remoteDirectory || viewItem == remoteFile)",
           "group": "2_workspace@3"
+        },
+        {
+          "command": "sftpPanel.searchRemote",
+          "when": "view == sftpPanel.explorerView && (viewItem == remoteConnectionRoot || viewItem == remoteDirectory)",
+          "group": "3_compare@1"
+        },
+        {
+          "command": "sftpPanel.diffWithRemote",
+          "when": "view == sftpPanel.explorerView && viewItem == remoteFile",
+          "group": "3_compare@2"
         }
       ]
     }

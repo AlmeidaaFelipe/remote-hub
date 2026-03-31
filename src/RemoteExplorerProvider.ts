@@ -14,9 +14,12 @@ export interface RemoteExplorerNode {
   entry?: RemoteEntry;
 }
 
-export class RemoteExplorerProvider implements vscode.TreeDataProvider<RemoteExplorerNode> {
+export class RemoteExplorerProvider implements vscode.TreeDataProvider<RemoteExplorerNode>, vscode.TreeDragAndDropController<RemoteExplorerNode> {
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<RemoteExplorerNode | void>();
   readonly onDidChangeTreeData: vscode.Event<RemoteExplorerNode | void> = this._onDidChangeTreeData.event;
+
+  dropMimeTypes = ['text/uri-list', 'application/vnd.code.tree.remoteExplorerNode'];
+  dragMimeTypes = ['text/uri-list', 'application/vnd.code.tree.remoteExplorerNode'];
 
   private _dirCache = new Map<string, RemoteEntry[]>();
 
@@ -145,5 +148,79 @@ export class RemoteExplorerProvider implements vscode.TreeDataProvider<RemoteExp
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  // Drag & Drop Implementation
+  async handleDrag(source: readonly RemoteExplorerNode[], dataTransfer: vscode.DataTransfer, token: vscode.CancellationToken): Promise<void> {
+    const urls: string[] = source.map(node => `sftp://${node.remotePath}`);
+    dataTransfer.set('text/uri-list', new vscode.DataTransferItem(urls.join('\r\n')));
+    dataTransfer.set('application/vnd.code.tree.remoteExplorerNode', new vscode.DataTransferItem(source));
+  }
+
+  async handleDrop(target: RemoteExplorerNode | undefined, dataTransfer: vscode.DataTransfer, token: vscode.CancellationToken): Promise<void> {
+    const targetDir = this.getTargetDirectory(target);
+    if (!targetDir || this._conn.status !== 'connected') {
+      return;
+    }
+
+    // Handle internal move (drag within the tree)
+    const internalDragData = dataTransfer.get('application/vnd.code.tree.remoteExplorerNode');
+    if (internalDragData) {
+      const sourceNodes: RemoteExplorerNode[] = internalDragData.value;
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Moving items...',
+          cancellable: false,
+        },
+        async () => {
+          for (const node of sourceNodes) {
+            if (node.remotePath === targetDir) continue; // Skip dropping on itself
+            const newPath = path.posix.join(targetDir, path.posix.basename(node.remotePath));
+            if (node.remotePath !== newPath) {
+              await this._conn.renamePath(node.remotePath, newPath);
+            }
+          }
+        }
+      );
+      this.refresh();
+      return;
+    }
+
+    // Handle external drop (upload from local)
+    const externalDragData = dataTransfer.get('text/uri-list');
+    if (externalDragData) {
+      const urlString = await externalDragData.asString();
+      const urls = urlString.split('\r\n').filter(Boolean);
+      for (const url of urls) {
+        const uri = vscode.Uri.parse(url);
+        if (uri.scheme === 'file') {
+          try {
+            const stat = await vscode.workspace.fs.stat(uri);
+            if (stat.type === vscode.FileType.File) {
+              const fileName = path.basename(uri.path);
+              await vscode.window.withProgress(
+                {
+                  location: vscode.ProgressLocation.Notification,
+                  title: `Uploading ${fileName}...`,
+                  cancellable: false,
+                },
+                async () => {
+                  const data = await vscode.workspace.fs.readFile(uri);
+                  await this._conn.uploadFile(path.posix.join(targetDir, fileName), Buffer.from(data));
+                }
+              );
+              vscode.window.setStatusBarMessage(`$(check) Uploaded ${fileName}`, 3000);
+            } else if (stat.type === vscode.FileType.Directory) {
+              // Basic support for dropping folders: just show a message for now or implement recursive later
+              vscode.window.showInformationMessage('Uploading entire directories via drag & drop is not yet supported. Please drop files individually.');
+            }
+          } catch (err) {
+            console.error(err);
+          }
+        }
+      }
+      this.refresh();
+    }
   }
 }

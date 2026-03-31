@@ -30,7 +30,7 @@
     <img alt="Open VSX Version" src="https://img.shields.io/open-vsx/v/AlmeidaaFelipe/remote-hub?label=Open%20VSX"></a>
   <br />
   <a href="https://marketplace.visualstudio.com/items?itemName=AlmeidaaFelipe.remote-hub">
-    <img alt="VS Code Marketplace Downloads" src="https://img.shields.io/visual-studio-marketplace/d/AlmeidaaFelipe.remote-hub?label=VS%20Code%20Downloads"></a>
+    <img alt="VS Code Marketplace Downloads" src="https://img.shields.io/visual-studio-marketplace/i/AlmeidaaFelipe.remote-hub?label=VS%20Code%20Downloads"></a>
   <a href="https://marketplace.visualstudio.com/items?itemName=AlmeidaaFelipe.remote-hub">
     <img alt="VS Code Marketplace Version" src="https://img.shields.io/visual-studio-marketplace/v/AlmeidaaFelipe.remote-hub?label=VS%20Code"></a>
   <br />
@@ -131,6 +131,31 @@ Right-click context menu on tree items includes:
 ### File Icons
 
 Remote Hub respects your active file icon theme. If you have an icon theme installed (e.g., **Material Icon Theme**, **vscode-icons**), the remote Explorer will display the correct icons for each file type automatically.
+
+### Inline Diff (Automatic)
+
+When you edit a remote file, Remote Hub automatically tracks changes against the original server version. The editor gutter shows colored markers:
+
+- 🟢 **Green bar** — new lines added
+- 🔴 **Red arrow** — lines deleted
+- 🔵 **Blue bar** — lines modified
+
+Click any gutter marker to see the inline diff popup showing the original vs. current content — identical to how Git works in VS Code.
+
+You can also right-click any file in the Remote Explorer and select **"Compare with Remote"** to open a full side-by-side diff view.
+
+After a successful upload, the diff baseline resets automatically.
+
+### Remote Search
+
+Quickly find text across your remote server files without downloading them first!
+
+Click the **Search** icon (🔍) in the Remote Explorer title bar, or right-click any folder and select **"Search Remote"**. Enter your search term, and Remote Hub will execute a fast native search (`grep`) over SSH and display the results in a drop-down menu. Click any result to instantly jump to that line in the remote file.
+*(Note: This feature requires an SSH or SFTP connection).*
+
+### Drag & Drop
+
+You can drag and drop files from your computer (e.g., Windows Explorer) directly into the Remote Hub explorer to upload them instantly. A native VS Code progress notification will keep you updated during the upload. You can also drag and drop files *within* the remote tree to move them between folders.
 
 ### Auto Upload
 

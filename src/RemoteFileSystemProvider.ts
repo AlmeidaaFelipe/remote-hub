@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { ConnectionManager } from './ConnectionManager';
+import { OriginalContentProvider } from './DiffProvider';
 import { t } from './i18n';
 
 /**
@@ -15,7 +16,10 @@ export class RemoteFileSystemProvider implements vscode.FileSystemProvider {
   // In-memory cache of file contents
   private _cache = new Map<string, Uint8Array>();
 
-  constructor(private _conn: ConnectionManager) {}
+  constructor(
+    private _conn: ConnectionManager,
+    private _originalProvider?: OriginalContentProvider
+  ) {}
 
   watch(): vscode.Disposable {
     return new vscode.Disposable(() => {});
@@ -59,6 +63,10 @@ export class RemoteFileSystemProvider implements vscode.FileSystemProvider {
 
     const bytes = new Uint8Array(buf);
     this._cache.set(uri.toString(), bytes);
+    // Save the original server content for inline diff decorations
+    if (this._originalProvider) {
+      this._originalProvider.setOriginal(remotePath, buf);
+    }
     return bytes;
   }
 
@@ -95,6 +103,10 @@ export class RemoteFileSystemProvider implements vscode.FileSystemProvider {
         }
       );
       vscode.window.setStatusBarMessage(t('uploaded', fileName), 3000);
+      // Update the original baseline after successful upload
+      if (this._originalProvider) {
+        this._originalProvider.updateOriginalAfterUpload(remotePath, content);
+      }
     } catch (err: any) {
       vscode.window.showErrorMessage(t('upload.failed', err.message));
     }

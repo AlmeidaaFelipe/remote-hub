@@ -248,6 +248,36 @@ export class ConnectionManager {
     });
   }
 
+  /** Execute a shell command (SSH only)  */
+  async execCommand(command: string): Promise<string> {
+    return this._enqueue(async () => {
+      if (!this._client) throw new Error('Not connected');
+      if (!this._isSshLikeProtocol(this._config?.protocol)) {
+        throw new Error('Command execution is only supported on SSH/SFTP connections');
+      }
+
+      return new Promise<string>((resolve, reject) => {
+        this._client.exec(command, (err: Error, stream: any) => {
+          if (err) return reject(err);
+          let stdout = '';
+          let stderr = '';
+          stream.on('data', (data: Buffer) => {
+            stdout += data.toString('utf8');
+          });
+          stream.stderr.on('data', (data: Buffer) => {
+            stderr += data.toString('utf8');
+          });
+          stream.on('close', (code: number) => {
+            if (code !== 0 && code !== 1 && stdout.length === 0 && stderr.length > 0) {
+              return reject(new Error(`Command failed (code ${code}): ${stderr}`));
+            }
+            resolve(stdout);
+          });
+        });
+      });
+    });
+  }
+
   /** Download a remote file to a buffer */
   async downloadFile(remotePath: string): Promise<Buffer> {
     return this._enqueue(async () => {
@@ -345,7 +375,7 @@ export class ConnectionManager {
     await this._enqueue(async () => {
       if (!this._client) throw new Error('Not connected');
 
-      if (this._config?.protocol === 'sftp') {
+      if (this._isSshLikeProtocol(this._config?.protocol)) {
         return new Promise<void>((resolve, reject) => {
           this._client.sftp((err: Error, sftp: any) => {
             if (err) return reject(err);
