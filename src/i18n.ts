@@ -5,6 +5,13 @@ interface Dictionary {
 }
 
 const en: Dictionary = {
+    'ssh.trust': 'Trust and connect',
+    'ssh.trustPrompt': 'Unknown SSH host {0}:{1}. Fingerprint: {2}. Verify this fingerprint with the server administrator before trusting it.',
+    'ssh.keyChanged': 'SSH host key changed for {0}:{1}. Connection blocked. Received fingerprint: {2}. Verify the change before using Forget SSH Host Key.',
+    'ssh.forgetTitle': 'Forget SSH Host Key',
+    'ssh.forgetPrompt': 'Forget the trusted SSH key for {0}? Verify the new fingerprint before reconnecting.',
+    'ssh.forget': 'Forget key',
+
     'connect.first': 'Connect to a server first.',
     'new.file': 'New Remote File',
     'create.file.in': 'Create file in {0}',
@@ -42,6 +49,21 @@ const en: Dictionary = {
     'search.resultsTitle': '{0} results found',
     'search.error': 'Search failed: {0}',
     'progress.searching': 'Searching for "{0}"...',
+    'compress.sshOnly': 'Remote compress/extract is only supported on SSH/SFTP connections.',
+    'compress.progress': 'Compressing {0}...',
+    'compress.done': 'Compressed to {0}',
+    'compress.error': 'Compress failed: {0}',
+    'extract.progress': 'Extracting {0}...',
+    'extract.done': 'Extracted {0}',
+    'extract.error': 'Extract failed: {0}',
+    'extract.unsupported': 'Unsupported archive format. Supported: .tar.gz, .tgz, .zip, .gz',
+    'watcher.started': 'File Watcher started for "{0}". Local changes will sync to the server automatically.',
+    'watcher.stopped': '$(eye-closed) File Watcher stopped',
+    'watcher.tooltip': 'Watching: {0} → {1} (click to stop)',
+    'watcher.syncError': 'Sync failed for {0}: {1}',
+    'watcher.warning': 'File Watcher will automatically upload, modify, and DELETE files on the server when local files change. Continue?',
+    'watcher.btnStart': 'Start Watching',
+    'watcher.selectFolder': 'Select a local folder to watch',
 
     // Webview strings
     'wv.savedConnections': 'Saved Connections',
@@ -69,6 +91,13 @@ const en: Dictionary = {
 };
 
 const pt: Dictionary = {
+    'ssh.trust': 'Confiar e conectar',
+    'ssh.trustPrompt': 'Servidor SSH desconhecido {0}:{1}. Impressão digital: {2}. Verifique esta impressão com o administrador antes de confiar.',
+    'ssh.keyChanged': 'Chave SSH alterada para {0}:{1}. Conexão bloqueada. Impressão recebida: {2}. Verifique a alteração antes de usar Esquecer chave SSH.',
+    'ssh.forgetTitle': 'Esquecer chave SSH',
+    'ssh.forgetPrompt': 'Esquecer a chave SSH confiável de {0}? Verifique a nova impressão digital antes de reconectar.',
+    'ssh.forget': 'Esquecer chave',
+
     'connect.first': 'Conecte-se a um servidor primeiro.',
     'new.file': 'Novo Arquivo Remoto',
     'create.file.in': 'Criar arquivo em {0}',
@@ -106,6 +135,21 @@ const pt: Dictionary = {
     'search.resultsTitle': '{0} resultados encontrados',
     'search.error': 'Falha na busca: {0}',
     'progress.searching': 'Buscando por "{0}"...',
+    'compress.sshOnly': 'Compactar/extrair remoto só é suportado em conexões SSH/SFTP.',
+    'compress.progress': 'Compactando {0}...',
+    'compress.done': 'Compactado para {0}',
+    'compress.error': 'Falha ao compactar: {0}',
+    'extract.progress': 'Extraindo {0}...',
+    'extract.done': 'Extraído {0}',
+    'extract.error': 'Falha ao extrair: {0}',
+    'extract.unsupported': 'Formato não suportado. Suportados: .tar.gz, .tgz, .zip, .gz',
+    'watcher.started': 'File Watcher iniciado para "{0}". Alterações locais serão sincronizadas automaticamente.',
+    'watcher.stopped': '$(eye-closed) File Watcher parado',
+    'watcher.tooltip': 'Monitorando: {0} → {1} (clique para parar)',
+    'watcher.syncError': 'Falha ao sincronizar {0}: {1}',
+    'watcher.warning': 'O File Watcher vai automaticamente enviar, modificar e EXCLUIR arquivos no servidor quando arquivos locais mudarem. Continuar?',
+    'watcher.btnStart': 'Iniciar Monitoramento',
+    'watcher.selectFolder': 'Selecione uma pasta local para monitorar',
 
     // Webview strings
     'wv.savedConnections': 'Conexões Salvas',

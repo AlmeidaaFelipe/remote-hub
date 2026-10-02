@@ -5,11 +5,14 @@ import { RemoteFileSystemProvider } from './RemoteFileSystemProvider';
 import { ConnectionManager } from './ConnectionManager';
 import { RemoteExplorerNode, RemoteExplorerProvider } from './RemoteExplorerProvider';
 import { OriginalContentProvider, RemoteQuickDiffProvider, openDiffForFile } from './DiffProvider';
+import { FileWatcher } from './FileWatcher';
+import { AutoUploadController } from './AutoUploadController';
 import { t } from './i18n';
+import { buildSearchCommand, buildCompressCommand, buildExtractCommand } from './RemoteCommands';
 
 let connectionManager: ConnectionManager;
 let remoteFs: RemoteFileSystemProvider;
-const AUTO_SAVE_DEBOUNCE_MS = 700;
+let fileWatcher: FileWatcher;
 
 export function activate(context: vscode.ExtensionContext) {
   const setCtx = (key: string, value: unknown) =>
@@ -20,15 +23,18 @@ export function activate(context: vscode.ExtensionContext) {
     const viewCfg = vscode.workspace.getConfiguration('workbench.view');
     const alwaysShowHeaderActions = viewCfg.get<boolean>('alwaysShowHeaderActions');
     if (alwaysShowHeaderActions !== true) {
-      viewCfg.update('alwaysShowHeaderActions', true, vscode.ConfigurationTarget.Workspace);
+      void viewCfg.update('alwaysShowHeaderActions', true, vscode.ConfigurationTarget.Workspace).then(undefined, () => {});
     }
-  } catch (_) {}
+  } catch { /* Workspace configuration may be read-only. */ }
 
   connectionManager = new ConnectionManager(context);
   const originalProvider = new OriginalContentProvider();
   remoteFs = new RemoteFileSystemProvider(connectionManager, originalProvider);
+  fileWatcher = new FileWatcher(connectionManager);
+  context.subscriptions.push(fileWatcher, connectionManager, remoteFs, originalProvider);
   setCtx('sftpPanel.connected', false);
   setCtx('sftpPanel.showConnections', true);
+  setCtx('sftpPanel.watcherActive', false);
 
   // Register the virtual filesystem for remote files
   context.subscriptions.push(
@@ -53,6 +59,7 @@ export function activate(context: vscode.ExtensionContext) {
     connectionManager
   );
   const remoteExplorerProvider = new RemoteExplorerProvider(connectionManager);
+  context.subscriptions.push(provider, remoteExplorerProvider);
 
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider('sftpPanel.mainView', provider)
@@ -64,8 +71,14 @@ export function activate(context: vscode.ExtensionContext) {
   });
   context.subscriptions.push(remoteExplorerView);
 
+  const getEffectiveNode = (node?: RemoteExplorerNode): RemoteExplorerNode | undefined => {
+    const selectedNode = remoteExplorerView.selection?.[0];
+    return (!node || node.type === 'connectionRoot') && selectedNode ? selectedNode : node;
+  };
+
   // Commands
   context.subscriptions.push(
+    vscode.commands.registerCommand('sftpPanel.forgetSshHostKey', () => connectionManager.forgetSshHostKey()),
     vscode.commands.registerCommand('sftpPanel.connect', () => {
       setCtx('sftpPanel.showConnections', true);
       vscode.commands.executeCommand('workbench.view.extension.sftp-panel');
@@ -95,6 +108,8 @@ export function activate(context: vscode.ExtensionContext) {
       remoteExplorerProvider.refresh();
     }),
     vscode.commands.registerCommand('sftpPanel.searchRemote', async (node?: RemoteExplorerNode) => {
+      const sessionId = node?.sessionId || connectionManager.sessionId;
+      connectionManager.assertSession(sessionId);
       if (connectionManager.status !== 'connected' || !connectionManager.config) {
         vscode.window.showWarningMessage(t('connect.first'));
         return;
@@ -104,11 +119,7 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      const selectedNode = remoteExplorerView.selection?.[0];
-      const effectiveNode =
-        (!node || node.type === 'connectionRoot') && selectedNode
-          ? selectedNode
-          : node;
+      const effectiveNode = getEffectiveNode(node);
       const targetDir = remoteExplorerProvider.getTargetDirectory(effectiveNode) || '/';
 
       const searchTerm = await vscode.window.showInputBox({
@@ -127,11 +138,8 @@ export function activate(context: vscode.ExtensionContext) {
             cancellable: false,
           },
           async () => {
-            // grep: recursive, line number, ignore binary.
-            // Escape search term properly to avoid shell injection via single quotes
-            const safeSearchTerm = searchTerm.replace(/'/g, "'\\''");
-            const command = `grep -rnI --exclude-dir=node_modules -e '${safeSearchTerm}' '${targetDir}'`;
-            return await connectionManager.execCommand(command);
+            const command = buildSearchCommand(searchTerm, targetDir);
+            return await connectionManager.execCommand(command, [0, 1], sessionId);
           }
         );
 
@@ -183,16 +191,15 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showErrorMessage(t('search.error', err.message || err));
       }
     }),
-    vscode.commands.registerCommand('sftpPanel.openRemoteFile', async (remotePath?: string) => {
+    vscode.commands.registerCommand('sftpPanel.openRemoteFile', async (remotePath?: string, sessionId = connectionManager.sessionId) => {
       if (!remotePath) return;
+      connectionManager.assertSession(sessionId);
       await remoteFs.openRemoteFile(remotePath);
     }),
     vscode.commands.registerCommand('sftpPanel.createRemoteFile', async (node?: RemoteExplorerNode) => {
-      const selectedNode = remoteExplorerView.selection?.[0];
-      const effectiveNode =
-        (!node || node.type === 'connectionRoot') && selectedNode
-          ? selectedNode
-          : node;
+      const sessionId = node?.sessionId || connectionManager.sessionId;
+      connectionManager.assertSession(sessionId);
+      const effectiveNode = getEffectiveNode(node);
       const targetDir = remoteExplorerProvider.getTargetDirectory(effectiveNode);
       if (!targetDir || connectionManager.status !== 'connected') {
         vscode.window.showWarningMessage(t('connect.first'));
@@ -213,16 +220,14 @@ export function activate(context: vscode.ExtensionContext) {
       if (!name) return;
 
       const remoteFilePath = path.posix.join(targetDir, name.trim());
-      await connectionManager.uploadFile(remoteFilePath, Buffer.alloc(0));
+      await connectionManager.uploadFile(remoteFilePath, Buffer.alloc(0), sessionId);
       await remoteFs.openRemoteFile(remoteFilePath);
       remoteExplorerProvider.refresh();
     }),
     vscode.commands.registerCommand('sftpPanel.createRemoteFolder', async (node?: RemoteExplorerNode) => {
-      const selectedNode = remoteExplorerView.selection?.[0];
-      const effectiveNode =
-        (!node || node.type === 'connectionRoot') && selectedNode
-          ? selectedNode
-          : node;
+      const sessionId = node?.sessionId || connectionManager.sessionId;
+      connectionManager.assertSession(sessionId);
+      const effectiveNode = getEffectiveNode(node);
       const targetDir = remoteExplorerProvider.getTargetDirectory(effectiveNode);
       if (!targetDir || connectionManager.status !== 'connected') {
         vscode.window.showWarningMessage(t('connect.first'));
@@ -243,15 +248,19 @@ export function activate(context: vscode.ExtensionContext) {
       if (!name) return;
 
       const remoteFolderPath = path.posix.join(targetDir, name.trim());
-      await connectionManager.createDirectory(remoteFolderPath);
+      await connectionManager.createDirectory(remoteFolderPath, sessionId);
       remoteExplorerProvider.refresh();
     }),
     vscode.commands.registerCommand('sftpPanel.copyRemotePath', async (node?: RemoteExplorerNode) => {
+      const sessionId = node?.sessionId || connectionManager.sessionId;
+      connectionManager.assertSession(sessionId);
       if (!node) return;
       await vscode.env.clipboard.writeText(node.remotePath);
       vscode.window.setStatusBarMessage(t('copied', node.remotePath), 2000);
     }),
     vscode.commands.registerCommand('sftpPanel.renameRemoteEntry', async (node?: RemoteExplorerNode) => {
+      const sessionId = node?.sessionId || connectionManager.sessionId;
+      connectionManager.assertSession(sessionId);
       if (!node || node.type === 'connectionRoot') return;
       const currentName = path.posix.basename(node.remotePath);
       const newName = await vscode.window.showInputBox({
@@ -268,10 +277,12 @@ export function activate(context: vscode.ExtensionContext) {
 
       const parent = path.posix.dirname(node.remotePath);
       const newPath = path.posix.join(parent, newName.trim());
-      await connectionManager.renamePath(node.remotePath, newPath);
+      await connectionManager.renamePath(node.remotePath, newPath, sessionId);
       remoteExplorerProvider.refresh();
     }),
     vscode.commands.registerCommand('sftpPanel.deleteRemoteEntry', async (node?: RemoteExplorerNode) => {
+      const sessionId = node?.sessionId || connectionManager.sessionId;
+      connectionManager.assertSession(sessionId);
       if (!node || node.type === 'connectionRoot') return;
       const label = path.posix.basename(node.remotePath);
       const answer = await vscode.window.showWarningMessage(
@@ -289,7 +300,7 @@ export function activate(context: vscode.ExtensionContext) {
             cancellable: false,
           },
           async () => {
-            await connectionManager.deletePath(node.remotePath, node.type === 'directory');
+            await connectionManager.deletePath(node.remotePath, node.type === 'directory', sessionId);
           }
         );
         remoteExplorerProvider.refresh();
@@ -315,6 +326,8 @@ export function activate(context: vscode.ExtensionContext) {
       provider.refreshSavedConnections();
     }),
     vscode.commands.registerCommand('sftpPanel.diffWithRemote', async (node?: RemoteExplorerNode) => {
+      const sessionId = node?.sessionId || connectionManager.sessionId;
+      connectionManager.assertSession(sessionId);
       // If called from a tree view item
       if (node && node.type === 'file') {
         await openDiffForFile(node.remotePath, connectionManager, originalProvider);
@@ -323,14 +336,137 @@ export function activate(context: vscode.ExtensionContext) {
       // If called without context, try the active editor
       const activeEditor = vscode.window.activeTextEditor;
       if (activeEditor && activeEditor.document.uri.scheme === 'sftp') {
+        remoteFs.bindDocument(activeEditor.document.uri);
         await openDiffForFile(activeEditor.document.uri.path, connectionManager, originalProvider);
         return;
       }
       vscode.window.showWarningMessage(t('diff.noFile'));
+    }),
+    vscode.commands.registerCommand('sftpPanel.compressRemote', async (node?: RemoteExplorerNode, selectedNodes?: RemoteExplorerNode[]) => {
+      const sessionId = node?.sessionId || connectionManager.sessionId;
+      connectionManager.assertSession(sessionId);
+      if (connectionManager.status !== 'connected' || !connectionManager.config) {
+        vscode.window.showWarningMessage(t('connect.first'));
+        return;
+      }
+      if (connectionManager.config.protocol !== 'ssh' && connectionManager.config.protocol !== 'sftp') {
+        vscode.window.showWarningMessage(t('compress.sshOnly'));
+        return;
+      }
+
+      // Use multi-selection if available, otherwise fall back to single node
+      const nodes = (selectedNodes && selectedNodes.length > 0)
+        ? selectedNodes.filter(n => n.type !== 'connectionRoot')
+        : (node && node.type !== 'connectionRoot' ? [node] : []);
+
+      if (nodes.length === 0) return;
+      for (const item of nodes) connectionManager.assertSession(item.sessionId || sessionId);
+
+      // All items must share the same parent directory
+      const parentDir = path.posix.dirname(nodes[0].remotePath);
+      if (nodes.some(item => path.posix.dirname(item.remotePath) !== parentDir)) {
+        vscode.window.showWarningMessage('Select items from the same directory.');
+        return;
+      }
+      const baseNames = nodes.map(n => path.posix.basename(n.remotePath));
+      const archiveName = nodes.length === 1
+        ? `${baseNames[0]}.tar.gz`
+        : 'archive.tar.gz';
+      const label = nodes.length === 1 ? baseNames[0] : `${nodes.length} items`;
+
+      try {
+        await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: t('compress.progress', label),
+            cancellable: false,
+          },
+          async () => {
+            const command = buildCompressCommand(parentDir, archiveName, baseNames);
+            await connectionManager.execCommand(command, [0], sessionId);
+          }
+        );
+        remoteExplorerProvider.refresh();
+        vscode.window.showInformationMessage(t('compress.done', archiveName));
+      } catch (err: any) {
+        vscode.window.showErrorMessage(t('compress.error', err.message || err));
+      }
+    }),
+    vscode.commands.registerCommand('sftpPanel.extractRemote', async (node?: RemoteExplorerNode) => {
+      const sessionId = node?.sessionId || connectionManager.sessionId;
+      connectionManager.assertSession(sessionId);
+      if (!node || node.type !== 'file') return;
+      if (connectionManager.status !== 'connected' || !connectionManager.config) {
+        vscode.window.showWarningMessage(t('connect.first'));
+        return;
+      }
+      if (connectionManager.config.protocol !== 'ssh' && connectionManager.config.protocol !== 'sftp') {
+        vscode.window.showWarningMessage(t('compress.sshOnly'));
+        return;
+      }
+
+      const remotePath = node.remotePath;
+      const baseName = path.posix.basename(remotePath);
+      const command = buildExtractCommand(remotePath);
+      if (!command) {
+        vscode.window.showWarningMessage(t('extract.unsupported'));
+        return;
+      }
+
+      try {
+        await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: t('extract.progress', baseName),
+            cancellable: false,
+          },
+          async () => {
+            await connectionManager.execCommand(command, [0], sessionId);
+          }
+        );
+        remoteExplorerProvider.refresh();
+        vscode.window.showInformationMessage(t('extract.done', baseName));
+      } catch (err: any) {
+        vscode.window.showErrorMessage(t('extract.error', err.message || err));
+      }
+    }),
+    vscode.commands.registerCommand('sftpPanel.startFileWatcher', async () => {
+      const sessionId = connectionManager.sessionId;
+      if (connectionManager.status !== 'connected' || !connectionManager.config) {
+        vscode.window.showWarningMessage(t('connect.first'));
+        return;
+      }
+
+      // Warn user about the destructive nature of sync
+      const confirm = await vscode.window.showWarningMessage(
+        t('watcher.warning'),
+        { modal: true },
+        t('watcher.btnStart')
+      );
+      if (confirm !== t('watcher.btnStart')) return;
+
+      const folders = await vscode.window.showOpenDialog({
+        canSelectFiles: false,
+        canSelectFolders: true,
+        canSelectMany: false,
+        openLabel: t('watcher.selectFolder'),
+      });
+      if (!folders || folders.length === 0) return;
+
+      const localFolder = folders[0].fsPath;
+      const remoteRoot = connectionManager.config.remotePath || '/';
+
+      connectionManager.assertSession(sessionId);
+      await fileWatcher.start(localFolder, remoteRoot);
+      setCtx('sftpPanel.watcherActive', true);
+    }),
+    vscode.commands.registerCommand('sftpPanel.stopFileWatcher', () => {
+      fileWatcher.stop();
+      setCtx('sftpPanel.watcherActive', false);
     })
   );
 
-  connectionManager.onStatusChange.event((status) => {
+  context.subscriptions.push(connectionManager.onStatusChange.event((status) => {
     if (status === 'connected') {
       setCtx('sftpPanel.connected', true);
       setCtx('sftpPanel.showConnections', false);
@@ -343,41 +479,16 @@ export function activate(context: vscode.ExtensionContext) {
       setCtx('sftpPanel.showConnections', true);
       remoteExplorerProvider.refresh();
       originalProvider.clearAll();
+      // Auto-stop file watcher on disconnect
+      if (fileWatcher.isActive) {
+        fileWatcher.stop();
+        setCtx('sftpPanel.watcherActive', false);
+      }
     }
-  });
+  }));
 
-  // Auto-upload on save for remote files
-  const pendingUploadTimers = new Map<string, NodeJS.Timeout>();
-  context.subscriptions.push(
-    vscode.workspace.onDidSaveTextDocument(async (doc) => {
-      if (doc.uri.scheme === 'sftp') {
-        const key = doc.uri.toString();
-        const existing = pendingUploadTimers.get(key);
-        if (existing) {
-          clearTimeout(existing);
-        }
+  context.subscriptions.push(new AutoUploadController(remoteFs, connectionManager));
 
-        const timer = setTimeout(async () => {
-          pendingUploadTimers.delete(key);
-          try {
-            await remoteFs.uploadOnSave(doc);
-          } catch (err: any) {
-            vscode.window.showErrorMessage(t('upload.failed', err?.message ?? err));
-          }
-        }, AUTO_SAVE_DEBOUNCE_MS);
-
-        pendingUploadTimers.set(key, timer);
-      }
-    })
-  );
-  context.subscriptions.push(
-    new vscode.Disposable(() => {
-      for (const timer of pendingUploadTimers.values()) {
-        clearTimeout(timer);
-      }
-      pendingUploadTimers.clear();
-    })
-  );
 }
 
 export function deactivate() {

@@ -2,7 +2,7 @@
   "name": "remote-hub",
   "displayName": "%remotehub.displayName%",
   "description": "%remotehub.description%",
-  "version": "1.0.4",
+  "version": "1.0.8",
   "publisher": "AlmeidaaFelipe",
   "icon": "icon.png",
   "author": "Felipe Almeida",
@@ -32,7 +32,7 @@
     "url": "https://github.com/AlmeidaaFelipe/remote-hub.git"
   },
   "activationEvents": [],
-  "main": "./out/extension.js",
+  "main": "out/extension.js",
   "contributes": {
     "viewsContainers": {
       "activitybar": [
@@ -129,6 +129,30 @@
         "command": "sftpPanel.searchRemote",
         "title": "%remotehub.command.searchRemote%",
         "icon": "$(search)"
+      },
+      {
+        "command": "sftpPanel.compressRemote",
+        "title": "%remotehub.command.compressRemote%",
+        "icon": "$(file-zip)"
+      },
+      {
+        "command": "sftpPanel.extractRemote",
+        "title": "%remotehub.command.extractRemote%",
+        "icon": "$(archive)"
+      },
+      {
+        "command": "sftpPanel.startFileWatcher",
+        "title": "%remotehub.command.startFileWatcher%",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "sftpPanel.stopFileWatcher",
+        "title": "%remotehub.command.stopFileWatcher%",
+        "icon": "$(eye-closed)"
+      },
+      {
+        "command": "sftpPanel.forgetSshHostKey",
+        "title": "%remotehub.command.forgetSshHostKey%"
       }
     ],
     "menus": {
@@ -159,9 +183,19 @@
           "group": "navigation@3"
         },
         {
+          "command": "sftpPanel.startFileWatcher",
+          "when": "view == sftpPanel.explorerView && !sftpPanel.watcherActive",
+          "group": "navigation@4"
+        },
+        {
+          "command": "sftpPanel.stopFileWatcher",
+          "when": "view == sftpPanel.explorerView && sftpPanel.watcherActive",
+          "group": "navigation@4"
+        },
+        {
           "command": "sftpPanel.refreshExplorer",
           "when": "view == sftpPanel.explorerView",
-          "group": "navigation@4"
+          "group": "navigation@5"
         }
       ],
       "webview/context": [
@@ -215,26 +249,47 @@
           "command": "sftpPanel.diffWithRemote",
           "when": "view == sftpPanel.explorerView && viewItem == remoteFile",
           "group": "3_compare@2"
+        },
+        {
+          "command": "sftpPanel.compressRemote",
+          "when": "view == sftpPanel.explorerView && (viewItem == remoteDirectory || viewItem == remoteFile)",
+          "group": "4_archive@1"
+        },
+        {
+          "command": "sftpPanel.extractRemote",
+          "when": "view == sftpPanel.explorerView && viewItem == remoteFile",
+          "group": "4_archive@2"
         }
       ]
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
+    "vscode:prepublish": "npm run build",
+    "build": "tsc -p ./",
+    "compile": "tools\\dev-ovsx.bat",
     "watch": "tsc -watch -p ./",
-    "lint": "eslint src --ext ts",
-    "dev-compile": "tools\\dev-ovsx.bat",
-    "pub": "tools\\ovsx.bat"
+    "test": "npm run build && node --test tests/*.test.cjs",
+    "lint": "eslint src tests eslint.config.cjs --max-warnings 0",
+    "pub": "tools\\ovsx.bat",
+    "typecheck": "tsc -p ./ --noEmit",
+    "test:editor": "npm run build && node tests/run-editor.cjs",
+    "check": "npm run lint && npm run typecheck && npm test && npm audit"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^20.0.0",
     "@types/ssh2": "^1.15.5",
     "@types/vscode": "^1.85.0",
-    "typescript": "^5.3.0"
+    "@vscode/test-electron": "^2.5.2",
+    "eslint": "^10.11.0",
+    "playwright": "^1.63.0",
+    "selfsigned": "^5.5.0",
+    "typescript": "^5.3.0",
+    "typescript-eslint": "^8.71.0",
+    "vscode-uri": "^3.2.0"
   },
   "dependencies": {
-    "basic-ftp": "^5.0.5",
+    "basic-ftp": "^6.2.1",
     "ssh2": "^1.15.0"
   }
 }

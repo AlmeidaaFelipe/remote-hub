@@ -44,7 +44,7 @@ export class SftpPanelViewProvider implements vscode.WebviewViewProvider {
     );
 
     // Handle messages from webview
-    webviewView.webview.onDidReceiveMessage(async (msg) => {
+    this._disposables.push(webviewView.webview.onDidReceiveMessage(async (msg) => {
       switch (msg.type) {
         case 'connect':
           await this._handleConnect(msg.config as ConnectionConfig);
@@ -82,13 +82,19 @@ export class SftpPanelViewProvider implements vscode.WebviewViewProvider {
           break;
         }
       }
-    });
+    }));
+    this._disposables.push(webviewView.onDidDispose(() => this.dispose()));
 
     // Send saved connections when panel opens
     this._post({
       type: 'savedConnections',
       connections: this._conn.getSavedConnections(),
     });
+  }
+
+  dispose(): void {
+    for (const disposable of this._disposables.splice(0)) disposable.dispose();
+    this._view = undefined;
   }
 
   refreshSavedConnections() {

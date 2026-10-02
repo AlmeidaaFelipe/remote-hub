@@ -17,5 +17,10 @@
   "remotehub.command.goToConnections": "Conexões",
   "remotehub.command.goToExplorer": "Explorador",
   "remotehub.command.stopConnection": "Parar Conexão",
-  "remotehub.command.searchRemote": "Busca Remota"
+  "remotehub.command.searchRemote": "Busca Remota",
+  "remotehub.command.compressRemote": "Compactar Aqui",
+  "remotehub.command.extractRemote": "Extrair Aqui",
+  "remotehub.command.startFileWatcher": "Iniciar File Watcher",
+  "remotehub.command.stopFileWatcher": "Parar File Watcher",
+  "remotehub.command.forgetSshHostKey": "Esquecer chave SSH"
 }

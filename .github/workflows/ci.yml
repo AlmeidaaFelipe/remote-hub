@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validation:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [22, 24]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Install test browser
+        run: npx playwright install --with-deps chromium
+      - name: Lint, typecheck, regression, transport, browser tests and audit
+        run: npm run check
+      - name: Test Extension Host on Linux
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:editor
+      - name: Test Extension Host on Windows
+        if: runner.os == 'Windows'
+        run: npm run test:editor

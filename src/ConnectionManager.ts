@@ -1,37 +1,42 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { randomUUID } from 'crypto';
+import { HostKeyVerifier } from './HostKeyVerifier';
+import { remoteUri } from './RemoteUri';
 import { SshConfigParser } from './SshConfigParser';
 
-export interface ConnectionConfig {
-  label: string;
-  protocol: 'ssh' | 'sftp' | 'ftp' | 'ftps';
-  host: string;
-  port: number;
-  username: string;
-  authType: 'password' | 'privateKey' | 'agent';
-  password?: string;
-  privateKeyPath?: string;
-  remotePath: string;
-  savePassword?: boolean;
-}
-
-export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
+import { ConnectionConfig, ConnectionStatus, RemoteEntry } from './ConnectionTypes';
+import { ConnectionStore } from './ConnectionStore';
+import { SerialQueue } from './SerialQueue';
+export { ConnectionConfig, ConnectionStatus, RemoteEntry } from './ConnectionTypes';
 
 export class ConnectionManager {
+  private _sessionId = randomUUID();
+  private readonly _connectionQueue = new SerialQueue();
+  private _pendingClient: any = null;
   private _client: any = null;
+  private _sftp: any = null;
   private _status: ConnectionStatus = 'disconnected';
   private _config: ConnectionConfig | null = null;
-  private _context: vscode.ExtensionContext;
-  private _secrets: vscode.SecretStorage;
-  private _operationQueue: Promise<void> = Promise.resolve();
+  private readonly _hostKeys: HostKeyVerifier;
+  private readonly _store: ConnectionStore;
+  private readonly _operationQueue = new SerialQueue();
 
   readonly onStatusChange = new vscode.EventEmitter<ConnectionStatus>();
   readonly onLog = new vscode.EventEmitter<string>();
 
   constructor(context: vscode.ExtensionContext) {
-    this._context = context;
-    this._secrets = context.secrets;
+    this._hostKeys = new HostKeyVerifier(context.globalState);
+    this._store = new ConnectionStore(context.globalState, context.secrets);
   }
+
+  get sessionId(): string { return this._sessionId; }
+
+  assertSession(sessionId: string): void {
+    if (sessionId !== this._sessionId) throw new Error('Connection changed. Reopen the file on the current server.');
+  }
+
+  uri(remotePath: string): vscode.Uri { return remoteUri(remotePath, this.sessionId); }
 
   get status(): ConnectionStatus {
     return this._status;
@@ -45,52 +50,32 @@ export class ConnectionManager {
     return this._client;
   }
 
+  async forgetSshHostKey(): Promise<void> { await this._hostKeys.forget(); }
+
   getSavedConnections(): ConnectionConfig[] {
-    return this._context.globalState.get<ConnectionConfig[]>('savedConnections', []);
+    return this._store.getSavedConnections();
   }
 
   async saveConnection(config: ConnectionConfig): Promise<void> {
-    const saved = this.getSavedConnections();
-    const idx = saved.findIndex((c) => c.label === config.label);
-    const toSave = { ...config };
-    delete toSave.password; // Never persist passwords in globalState
-    if (idx >= 0) {
-      saved[idx] = toSave;
-    } else {
-      saved.unshift(toSave);
-    }
-    await this._context.globalState.update('savedConnections', saved.slice(0, 10));
-
-    // Store password securely via SecretStorage if user opted in
-    if (config.savePassword && config.authType === 'password' && config.password) {
-      const secretKey = this._makeSecretKey(config);
-      await this._secrets.store(secretKey, config.password);
-    }
+    await this._store.saveConnection(config);
   }
 
   async deleteConnection(label: string): Promise<void> {
-    const saved = this.getSavedConnections();
-    const conn = saved.find(c => c.label === label);
-    if (conn) {
-      const secretKey = this._makeSecretKey(conn);
-      await this._secrets.delete(secretKey);
-    }
-    const filtered = saved.filter(c => c.label !== label);
-    await this._context.globalState.update('savedConnections', filtered);
+    await this._store.deleteConnection(label);
   }
 
-  /** Retrieve a stored password from SecretStorage */
   async getStoredPassword(config: ConnectionConfig): Promise<string | undefined> {
-    const secretKey = this._makeSecretKey(config);
-    return this._secrets.get(secretKey);
+    return this._store.getStoredPassword(config);
   }
 
   async connect(config: ConnectionConfig): Promise<void> {
-    if (this._client) {
-      this._log('Switching server: disconnecting current connection...');
-      this.disconnect();
-    }
+    this.disconnect();
+    const sessionId = this.sessionId;
+    return this._connectionQueue.enqueue(() => this._connect(config, sessionId));
+  }
 
+  private async _connect(config: ConnectionConfig, sessionId: string): Promise<void> {
+    this.assertSession(sessionId);
     const effectiveConfig: ConnectionConfig = { ...config };
 
     if (this._isSshLikeProtocol(effectiveConfig.protocol)) {
@@ -126,82 +111,107 @@ export class ConnectionManager {
       throw new Error('Password is required for this saved connection.');
     }
 
+    this.assertSession(sessionId);
     this._setStatus('connecting');
     this._config = effectiveConfig;
     this._log(`Connecting to ${effectiveConfig.host}:${effectiveConfig.port} via ${effectiveConfig.protocol.toUpperCase()}...`);
 
     try {
       if (this._isSshLikeProtocol(effectiveConfig.protocol)) {
-        await this._connectSftp(effectiveConfig);
+        await this._connectSftp(effectiveConfig, sessionId);
       } else {
-        await this._connectFtp(effectiveConfig);
+        await this._connectFtp(effectiveConfig, sessionId);
       }
+      this.assertSession(sessionId);
       this._setStatus('connected');
       this._log(`✓ Connected successfully as ${effectiveConfig.username}`);
       await this.saveConnection(effectiveConfig);
     } catch (err: any) {
+      if (sessionId !== this.sessionId) throw err;
+      try { this._pendingClient?.end?.(); this._pendingClient?.close?.(); } catch { /* Failed transports may already be closed. */ }
+      this._pendingClient = null;
       this._setStatus('error');
       this._log(`✗ Connection failed: ${err.message}`);
       throw err;
     }
   }
 
-  private async _connectSftp(config: ConnectionConfig): Promise<void> {
+  private async _connectSftp(config: ConnectionConfig, sessionId = this.sessionId): Promise<void> {
     // Dynamic import to avoid bundling issues in dev
     const { Client } = await import('ssh2');
-    return new Promise(async (resolve, reject) => {
-      const client = new Client();
-      const connConfig: any = {
-        host: config.host,
-        port: config.port,
-        username: config.username,
-        keepaliveInterval: 10000,
-        keepaliveCountMax: 6,
-      };
+    const client = new Client();
+    const connConfig: any = {
+      host: config.host,
+      port: config.port,
+      username: config.username,
+      keepaliveInterval: 10000,
+      keepaliveCountMax: 6,
+      hostVerifier: (key: Buffer, callback: (verified: boolean) => void) => {
+        void this._hostKeys.verify(config.host, config.port, key).then(
+          trusted => callback(trusted && sessionId === this.sessionId),
+          () => callback(false)
+        );
+      },
+    };
 
-      if (config.authType === 'password') {
-        connConfig.password = config.password;
-      } else if (config.authType === 'privateKey') {
-        const fs = require('fs');
-        const keyPath = config.privateKeyPath!.replace('~', require('os').homedir());
-        const keyData = fs.readFileSync(keyPath);
+    if (config.authType === 'password') {
+      connConfig.password = config.password;
+    } else if (config.authType === 'privateKey') {
+      const fs = require('fs');
+      const keyPath = config.privateKeyPath!.replace('~', require('os').homedir());
+      const keyData = fs.readFileSync(keyPath);
 
-        // Check if the key is encrypted and ask for passphrase
-        const keyStr = keyData.toString('utf8');
-        if (keyStr.includes('ENCRYPTED')) {
-          const vscode = require('vscode');
-          const passphrase = await vscode.window.showInputBox({
-            title: 'SSH Key Passphrase',
-            prompt: `Enter passphrase for ${config.privateKeyPath}`,
-            password: true,
-          });
-          if (!passphrase) {
-            return reject(new Error('Passphrase is required for this encrypted key.'));
-          }
-          connConfig.privateKey = keyData;
-          connConfig.passphrase = passphrase;
-        } else {
-          connConfig.privateKey = keyData;
+      // Check if the key is encrypted and ask for passphrase
+      const keyStr = keyData.toString('utf8');
+      if (keyStr.includes('ENCRYPTED')) {
+        const vscode = require('vscode');
+        const passphrase = await vscode.window.showInputBox({
+          title: 'SSH Key Passphrase',
+          prompt: `Enter passphrase for ${config.privateKeyPath}`,
+          password: true,
+        });
+        if (!passphrase) {
+          throw new Error('Passphrase is required for this encrypted key.');
         }
+        connConfig.privateKey = keyData;
+        connConfig.passphrase = passphrase;
       } else {
-        connConfig.agent = process.platform === 'win32'
-          ? '\\\\.\\pipe\\openssh-ssh-agent'
-          : process.env.SSH_AUTH_SOCK;
+        connConfig.privateKey = keyData;
       }
+    } else {
+      connConfig.agent = process.platform === 'win32'
+        ? '\\\\.\\pipe\\openssh-ssh-agent'
+        : process.env.SSH_AUTH_SOCK;
+    }
 
+    this.assertSession(sessionId);
+    this._pendingClient = client;
+    return new Promise<void>((resolve, reject) => {
       client
         .on('ready', () => {
-          this._client = client;
-          resolve();
+          client.sftp((err: any, sftp: any) => {
+            if (err) {
+              client.end();
+              return reject(err);
+            }
+            if (sessionId !== this.sessionId) { client.end(); return reject(new Error('Connection changed.')); }
+            this._pendingClient = null;
+            this._client = client;
+            this._sftp = sftp;
+            resolve();
+          });
         })
         .on('error', reject)
+        .on('close', () => reject(new Error('Connection closed')))
         .connect(connConfig);
     });
   }
 
-  private async _connectFtp(config: ConnectionConfig): Promise<void> {
+  private async _connectFtp(config: ConnectionConfig, sessionId = this.sessionId): Promise<void> {
     const { Client } = await import('basic-ftp');
+    this.assertSession(sessionId);
     const client = new Client();
+    this._pendingClient = client;
     await client.access({
       host: config.host,
       port: config.port,
@@ -209,30 +219,29 @@ export class ConnectionManager {
       password: config.password,
       secure: config.protocol === 'ftps',
     });
+    if (sessionId !== this.sessionId) { client.close(); throw new Error('Connection changed.'); }
+    this._pendingClient = null;
     this._client = client;
   }
 
   /** List directory contents */
-  async listDir(remotePath: string): Promise<RemoteEntry[]> {
+  async listDir(remotePath: string, sessionId = this.sessionId): Promise<RemoteEntry[]> {
     return this._enqueue(async () => {
       if (!this._client) throw new Error('Not connected');
 
       if (this._isSshLikeProtocol(this._config?.protocol)) {
         return new Promise((resolve, reject) => {
-          this._client.sftp((err: Error, sftp: any) => {
+          this._sftp.readdir(remotePath, (err: Error, list: any[]) => {
             if (err) return reject(err);
-            sftp.readdir(remotePath, (err2: Error, list: any[]) => {
-              if (err2) return reject(err2);
-              resolve(
-                list.map((f) => ({
-                  name: f.filename,
-                  fullPath: path.posix.join(remotePath, f.filename),
-                  isDirectory: f.attrs.isDirectory(),
-                  size: f.attrs.size,
-                  modifiedAt: new Date(f.attrs.mtime * 1000),
-                }))
-              );
-            });
+            resolve(
+              list.map((f) => ({
+                name: f.filename,
+                fullPath: path.posix.join(remotePath, f.filename),
+                isDirectory: f.attrs.isDirectory(),
+                size: f.attrs.size,
+                modifiedAt: new Date(f.attrs.mtime * 1000),
+              }))
+            );
           });
         });
       }
@@ -245,11 +254,33 @@ export class ConnectionManager {
         size: f.size,
         modifiedAt: f.modifiedAt,
       }));
-    });
+    }, sessionId);
+  }
+
+  async statPath(remotePath: string, sessionId = this.sessionId): Promise<RemoteEntry> {
+    return this._enqueue(async () => {
+      if (!this._client) throw new Error('Not connected');
+      if (this._isSshLikeProtocol(this._config?.protocol)) {
+        return new Promise<RemoteEntry>((resolve, reject) => {
+          this._sftp.stat(remotePath, (err: Error | undefined, attrs: any) => {
+            if (err) return reject(err);
+            resolve({ name: path.posix.basename(remotePath), fullPath: remotePath, isDirectory: attrs.isDirectory(), size: attrs.size, modifiedAt: new Date(attrs.mtime * 1000) });
+          });
+        });
+      }
+      if (remotePath === '/') {
+        await this._client.list('/');
+        return { name: '/', fullPath: '/', isDirectory: true, size: 0, modifiedAt: new Date(0) };
+      }
+      const entries = await this._client.list(path.posix.dirname(remotePath));
+      const entry = entries.find((entry: any) => entry.name === path.posix.basename(remotePath));
+      if (!entry) throw Object.assign(new Error('File not found'), { code: 2 });
+      return { name: entry.name, fullPath: remotePath, isDirectory: entry.isDirectory, size: entry.size, modifiedAt: entry.modifiedAt || new Date(0) };
+    }, sessionId);
   }
 
   /** Execute a shell command (SSH only)  */
-  async execCommand(command: string): Promise<string> {
+  async execCommand(command: string, allowedExitCodes: number[] = [0], sessionId = this.sessionId): Promise<string> {
     return this._enqueue(async () => {
       if (!this._client) throw new Error('Not connected');
       if (!this._isSshLikeProtocol(this._config?.protocol)) {
@@ -267,19 +298,20 @@ export class ConnectionManager {
           stream.stderr.on('data', (data: Buffer) => {
             stderr += data.toString('utf8');
           });
+          stream.on('error', reject);
           stream.on('close', (code: number) => {
-            if (code !== 0 && code !== 1 && stdout.length === 0 && stderr.length > 0) {
+            if (!allowedExitCodes.includes(code)) {
               return reject(new Error(`Command failed (code ${code}): ${stderr}`));
             }
             resolve(stdout);
           });
         });
       });
-    });
+    }, sessionId);
   }
 
   /** Download a remote file to a buffer */
-  async downloadFile(remotePath: string): Promise<Buffer> {
+  async downloadFile(remotePath: string, sessionId = this.sessionId): Promise<Buffer> {
     return this._enqueue(async () => {
       if (!this._client) throw new Error('Not connected');
       const { Writable } = require('stream');
@@ -287,13 +319,10 @@ export class ConnectionManager {
 
       if (this._isSshLikeProtocol(this._config?.protocol)) {
         return new Promise((resolve, reject) => {
-          this._client.sftp((err: Error, sftp: any) => {
-            if (err) return reject(err);
-            const stream = sftp.createReadStream(remotePath);
-            stream.on('data', (chunk: Buffer) => chunks.push(chunk));
-            stream.on('end', () => resolve(Buffer.concat(chunks)));
-            stream.on('error', reject);
-          });
+          const stream = this._sftp.createReadStream(remotePath);
+          stream.on('data', (chunk: Buffer) => chunks.push(chunk));
+          stream.on('end', () => resolve(Buffer.concat(chunks)));
+          stream.on('error', reject);
         });
       }
 
@@ -305,91 +334,81 @@ export class ConnectionManager {
       });
       await this._client.downloadTo(writable, remotePath);
       return Buffer.concat(chunks);
-    });
+    }, sessionId);
   }
 
   /** Upload a buffer to a remote path */
-  async uploadFile(remotePath: string, content: Buffer): Promise<void> {
+  async uploadFile(remotePath: string, content: Buffer, sessionId = this.sessionId): Promise<void> {
     await this._enqueue(async () => {
       if (!this._client) throw new Error('Not connected');
       const { Readable } = require('stream');
 
       if (this._isSshLikeProtocol(this._config?.protocol)) {
         return new Promise<void>((resolve, reject) => {
-          this._client.sftp((err: Error, sftp: any) => {
-            if (err) return reject(err);
-            const stream = sftp.createWriteStream(remotePath);
-            stream.on('close', resolve);
-            stream.on('error', reject);
-            stream.end(content);
-          });
+          const stream = this._sftp.createWriteStream(remotePath);
+          stream.on('close', resolve);
+          stream.on('error', reject);
+          stream.end(content);
         });
       }
 
       const readable = Readable.from(content);
       await this._client.uploadFrom(readable, remotePath);
-    });
+    }, sessionId);
   }
 
-  async createDirectory(remotePath: string): Promise<void> {
+  async createDirectory(remotePath: string, sessionId = this.sessionId): Promise<void> {
     await this._enqueue(async () => {
       if (!this._client) throw new Error('Not connected');
 
       if (this._isSshLikeProtocol(this._config?.protocol)) {
         return new Promise<void>((resolve, reject) => {
-          this._client.sftp((err: Error, sftp: any) => {
+          this._sftp.mkdir(remotePath, (err: Error | undefined) => {
             if (err) return reject(err);
-            sftp.mkdir(remotePath, (mkdirErr: Error | undefined) => {
-              if (mkdirErr) return reject(mkdirErr);
-              resolve();
-            });
+            resolve();
           });
         });
       }
 
-      await this._client.ensureDir(remotePath);
-    });
+      const client = this._client;
+      const previous = await client.pwd();
+      try { await client.ensureDir(remotePath); } finally { await client.cd(previous); }
+    }, sessionId);
   }
 
-  async renamePath(oldPath: string, newPath: string): Promise<void> {
+  async renamePath(oldPath: string, newPath: string, sessionId = this.sessionId): Promise<void> {
     await this._enqueue(async () => {
       if (!this._client) throw new Error('Not connected');
 
       if (this._isSshLikeProtocol(this._config?.protocol)) {
         return new Promise<void>((resolve, reject) => {
-          this._client.sftp((err: Error, sftp: any) => {
+          this._sftp.rename(oldPath, newPath, (err: Error | undefined) => {
             if (err) return reject(err);
-            sftp.rename(oldPath, newPath, (renameErr: Error | undefined) => {
-              if (renameErr) return reject(renameErr);
-              resolve();
-            });
+            resolve();
           });
         });
       }
 
       await this._client.rename(oldPath, newPath);
-    });
+    }, sessionId);
   }
 
-  async deletePath(remotePath: string, isDirectory: boolean): Promise<void> {
+  async deletePath(remotePath: string, isDirectory: boolean, sessionId = this.sessionId): Promise<void> {
     await this._enqueue(async () => {
       if (!this._client) throw new Error('Not connected');
 
       if (this._isSshLikeProtocol(this._config?.protocol)) {
         return new Promise<void>((resolve, reject) => {
-          this._client.sftp((err: Error, sftp: any) => {
-            if (err) return reject(err);
-            if (!isDirectory) {
-              sftp.unlink(remotePath, (unlinkErr: Error | undefined) => {
-                if (unlinkErr) return reject(unlinkErr);
-                resolve();
-              });
-              return;
-            }
-            this._deleteSftpDirectoryRecursive(sftp, remotePath)
-              .then(resolve)
-              .catch(reject);
-          });
+          if (!isDirectory) {
+            this._sftp.unlink(remotePath, (err: Error | undefined) => {
+              if (err) return reject(err);
+              resolve();
+            });
+            return;
+          }
+          this._deleteSftpDirectoryRecursive(this._sftp, remotePath)
+            .then(resolve)
+            .catch(reject);
         });
       }
 
@@ -398,21 +417,31 @@ export class ConnectionManager {
       } else {
         await this._client.remove(remotePath);
       }
-    });
+    }, sessionId);
   }
 
   disconnect(): void {
+    this._sessionId = randomUUID();
+    try { this._pendingClient?.end?.(); this._pendingClient?.close?.(); } catch { /* Pending transports may already be closed. */ }
+    this._pendingClient = null;
     try {
       if (this._isSshLikeProtocol(this._config?.protocol)) {
         this._client?.end();
       } else {
         this._client?.close();
       }
-    } catch (_) {}
+    } catch { /* Closing an already disconnected transport is harmless. */ }
     this._client = null;
+    this._sftp = null;
     this._config = null;
     this._setStatus('disconnected');
     this._log('Disconnected.');
+  }
+
+  dispose(): void {
+    this.disconnect();
+    this.onStatusChange.dispose();
+    this.onLog.dispose();
   }
 
   private _setStatus(status: ConnectionStatus) {
@@ -430,35 +459,24 @@ export class ConnectionManager {
     return protocol === 'ssh' || protocol === 'sftp';
   }
 
-  private _makeSecretKey(config: ConnectionConfig): string {
-    return `remotehub:${config.protocol}://${config.username}@${config.host}:${config.port}`;
+  private _enqueue<T>(operation: () => Promise<T>, sessionId = this.sessionId): Promise<T> {
+    return this._operationQueue.enqueue(async () => {
+      this.assertSession(sessionId);
+      const result = await this._runWithReconnect(operation, sessionId);
+      this.assertSession(sessionId);
+      return result;
+    });
   }
 
-  private _enqueue<T>(operation: () => Promise<T>): Promise<T> {
-    const run = this._operationQueue.then(
-      () => this._runWithReconnect(operation),
-      () => this._runWithReconnect(operation)
-    );
-    this._operationQueue = run.then(
-      () => undefined,
-      () => undefined
-    );
-    return run;
-  }
-
-  private async _runWithReconnect<T>(operation: () => Promise<T>): Promise<T> {
+  private async _runWithReconnect<T>(operation: () => Promise<T>, sessionId: string): Promise<T> {
     try {
       return await operation();
     } catch (err: any) {
-      if (!this._isReconnectableError(err)) {
-        throw err;
-      }
-
-      const reconnected = await this._reconnect();
-      if (!reconnected) {
-        throw err;
-      }
-
+      this.assertSession(sessionId);
+      if (!this._isReconnectableError(err)) throw err;
+      const reconnected = await this._reconnect(sessionId);
+      this.assertSession(sessionId);
+      if (!reconnected) throw err;
       return operation();
     }
   }
@@ -475,7 +493,7 @@ export class ConnectionManager {
     );
   }
 
-  private async _reconnect(): Promise<boolean> {
+  private async _reconnect(sessionId = this.sessionId): Promise<boolean> {
     if (!this._config) {
       return false;
     }
@@ -491,6 +509,7 @@ export class ConnectionManager {
       return false;
     }
 
+    this.assertSession(sessionId);
     this._log('Connection dropped. Reconnecting automatically...');
     try {
       try {
@@ -499,20 +518,23 @@ export class ConnectionManager {
         } else {
           this._client?.close();
         }
-      } catch (_) {}
+      } catch { /* Closing an already disconnected transport is harmless. */ }
       this._client = null;
+      this._sftp = null;
 
       this._setStatus('connecting');
       if (this._isSshLikeProtocol(cfg.protocol)) {
-        await this._connectSftp(cfg);
+        await this._connectSftp(cfg, sessionId);
       } else {
-        await this._connectFtp(cfg);
+        await this._connectFtp(cfg, sessionId);
       }
+      this.assertSession(sessionId);
       this._config = cfg;
       this._setStatus('connected');
       this._log('✓ Reconnected.');
       return true;
     } catch (reconnectErr: any) {
+      if (sessionId !== this.sessionId) return false;
       this._setStatus('error');
       this._log(`✗ Reconnect failed: ${reconnectErr.message}`);
       return false;
@@ -528,6 +550,7 @@ export class ConnectionManager {
     });
 
     for (const entry of list) {
+      if (entry.filename === '.' || entry.filename === '..' || entry.filename.includes('/')) continue;
       const childPath = path.posix.join(dirPath, entry.filename);
       if (entry.attrs?.isDirectory?.()) {
         await this._deleteSftpDirectoryRecursive(sftp, childPath);
@@ -548,12 +571,4 @@ export class ConnectionManager {
       });
     });
   }
-}
-
-export interface RemoteEntry {
-  name: string;
-  fullPath: string;
-  isDirectory: boolean;
-  size: number;
-  modifiedAt: Date;
 }

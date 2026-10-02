@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { ConnectionManager } from './ConnectionManager';
 import * as path from 'path';
 import { t } from './i18n';
+import { originalUri } from './RemoteUri';
 
 /**
  * Stores the "original" content fetched from the remote server
@@ -16,16 +17,18 @@ export class OriginalContentProvider implements vscode.TextDocumentContentProvid
   readonly onDidChange: vscode.Event<vscode.Uri> = this._onDidChange.event;
 
   /** Save the original server content for a given remote path */
-  setOriginal(remotePath: string, content: Buffer | Uint8Array): void {
+  setOriginal(remotePath: string | vscode.Uri, content: Buffer | Uint8Array): void {
     const text = Buffer.from(content).toString('utf8');
-    this._originals.set(remotePath, text);
+    const uri = typeof remotePath === 'string' ? vscode.Uri.from({ scheme: 'sftp', path: remotePath }) : remotePath;
+    this._originals.set(originalUri(uri).toString(), text);
     // Notify VS Code that this URI content changed so it re-reads
-    this._onDidChange.fire(vscode.Uri.parse(`sftp-original://${remotePath}`));
+    this._onDidChange.fire(originalUri(uri));
   }
 
   /** Remove original content (e.g. on disconnect) */
-  clearOriginal(remotePath: string): void {
-    this._originals.delete(remotePath);
+  clearOriginal(remotePath: string | vscode.Uri): void {
+    const uri = typeof remotePath === 'string' ? vscode.Uri.from({ scheme: 'sftp-original', path: remotePath }) : originalUri(remotePath);
+    this._originals.delete(uri.toString());
   }
 
   /** Clear all stored originals */
@@ -35,14 +38,14 @@ export class OriginalContentProvider implements vscode.TextDocumentContentProvid
 
   /** Called by VS Code when it needs the content for an sftp-original:// URI */
   provideTextDocumentContent(uri: vscode.Uri): string {
-    return this._originals.get(uri.path) ?? '';
+    return this._originals.get(originalUri(uri).toString()) ?? '';
   }
 
+  dispose(): void { this.clearAll(); this._onDidChange.dispose(); }
+
   /** After a successful upload, update the original to match the new content */
-  updateOriginalAfterUpload(remotePath: string, newContent: Buffer | Uint8Array): void {
-    const text = Buffer.from(newContent).toString('utf8');
-    this._originals.set(remotePath, text);
-    this._onDidChange.fire(vscode.Uri.parse(`sftp-original://${remotePath}`));
+  updateOriginalAfterUpload(remotePath: string | vscode.Uri, newContent: Buffer | Uint8Array): void {
+    this.setOriginal(remotePath, newContent);
   }
 }
 
@@ -53,7 +56,7 @@ export class OriginalContentProvider implements vscode.TextDocumentContentProvid
 export class RemoteQuickDiffProvider implements vscode.QuickDiffProvider {
   provideOriginalResource(uri: vscode.Uri): vscode.Uri | undefined {
     if (uri.scheme === 'sftp') {
-      return vscode.Uri.parse(`sftp-original://${uri.path}`);
+      return originalUri(uri);
     }
     return undefined;
   }
@@ -69,6 +72,8 @@ export async function openDiffForFile(
   originalProvider: OriginalContentProvider
 ): Promise<void> {
   const fileName = path.posix.basename(remotePath);
+  const session = conn.sessionId;
+  const rightUri = conn.uri(remotePath);
 
   // Fetch the latest version from the server
   const serverContent = await vscode.window.withProgress(
@@ -77,14 +82,14 @@ export async function openDiffForFile(
       title: t('diff.fetching', fileName),
       cancellable: false,
     },
-    async () => conn.downloadFile(remotePath)
+    async () => conn.downloadFile(remotePath, session)
   );
 
   // Update the original provider with the fresh server content
-  originalProvider.setOriginal(remotePath, serverContent);
+  conn.assertSession(session);
+  originalProvider.setOriginal(rightUri, serverContent);
 
-  const leftUri = vscode.Uri.parse(`sftp-original://${remotePath}`);
-  const rightUri = vscode.Uri.parse(`sftp://${remotePath}`);
+  const leftUri = originalUri(rightUri);
   const title = t('diff.title', fileName);
 
   await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title);

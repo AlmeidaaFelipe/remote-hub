@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { ConnectionManager, RemoteEntry } from './ConnectionManager';
 import * as path from 'path';
+import { uploadLocalEntry } from './LocalUploader';
 
 export type RemoteExplorerNodeType =
   | 'connectionRoot'
@@ -9,6 +10,7 @@ export type RemoteExplorerNodeType =
 
 export interface RemoteExplorerNode {
   type: RemoteExplorerNodeType;
+  sessionId?: string;
   label: string;
   remotePath: string;
   entry?: RemoteEntry;
@@ -21,18 +23,23 @@ export class RemoteExplorerProvider implements vscode.TreeDataProvider<RemoteExp
   dropMimeTypes = ['text/uri-list', 'application/vnd.code.tree.remoteExplorerNode'];
   dragMimeTypes = ['text/uri-list', 'application/vnd.code.tree.remoteExplorerNode'];
 
+  private readonly _statusSubscription: vscode.Disposable;
+  private _revision = 0;
   private _dirCache = new Map<string, RemoteEntry[]>();
 
   constructor(
     private readonly _conn: ConnectionManager
   ) {
-    this._conn.onStatusChange.event(() => {
+    this._statusSubscription = this._conn.onStatusChange.event(() => {
       this._dirCache.clear();
       this.refresh();
     });
   }
 
+  dispose(): void { this._statusSubscription.dispose(); this._onDidChangeTreeData.dispose(); this._dirCache.clear(); }
+
   refresh(): void {
+    this._revision++;
     this._dirCache.clear();
     this._onDidChangeTreeData.fire();
   }
@@ -56,14 +63,14 @@ export class RemoteExplorerProvider implements vscode.TreeDataProvider<RemoteExp
     );
     item.tooltip = entry.fullPath;
     // resourceUri lets VS Code resolve icons from the active file icon theme
-    item.resourceUri = vscode.Uri.parse(`sftp://${entry.fullPath}`);
+    item.resourceUri = this._conn.uri(entry.fullPath);
     item.contextValue = entry.isDirectory ? 'remoteDirectory' : 'remoteFile';
 
     if (element.type === 'file') {
       item.command = {
         command: 'sftpPanel.openRemoteFile',
         title: 'Open Remote File',
-        arguments: [entry.fullPath],
+        arguments: [entry.fullPath, element.sessionId],
       };
       if (typeof entry.size === 'number') {
         item.description = this._formatSize(entry.size);
@@ -82,6 +89,7 @@ export class RemoteExplorerProvider implements vscode.TreeDataProvider<RemoteExp
       const rootPath = this._conn.config.remotePath || '/';
       return [{
         type: 'connectionRoot',
+        sessionId: this._conn.sessionId,
         label: this._conn.config.label || 'Connection',
         remotePath: rootPath,
       }];
@@ -91,22 +99,14 @@ export class RemoteExplorerProvider implements vscode.TreeDataProvider<RemoteExp
       return [];
     }
 
-    if (element.type === 'connectionRoot') {
-      const rootPath = element.remotePath;
-      const entries = await this._getDirectoryEntries(rootPath);
-      return entries.map((entry) => ({
-        type: entry.isDirectory ? 'directory' as const : 'file' as const,
-        label: entry.name,
-        remotePath: entry.fullPath,
-        entry,
-      }));
-    }
-
+    if (element.sessionId) this._conn.assertSession(element.sessionId);
+    const sessionId = this._conn.sessionId;
     const remotePath = element.remotePath;
     const entries = await this._getDirectoryEntries(remotePath);
 
     return entries.map((entry) => ({
       type: entry.isDirectory ? 'directory' : 'file',
+      sessionId,
       label: entry.name,
       remotePath: entry.fullPath,
       entry,
@@ -115,6 +115,7 @@ export class RemoteExplorerProvider implements vscode.TreeDataProvider<RemoteExp
 
   getTargetDirectory(node?: RemoteExplorerNode): string | undefined {
     if (!this._conn.config) return undefined;
+    if (node?.sessionId) this._conn.assertSession(node.sessionId);
     if (
       !node ||
       node.type === 'connectionRoot'
@@ -133,14 +134,17 @@ export class RemoteExplorerProvider implements vscode.TreeDataProvider<RemoteExp
       return cached;
     }
 
-    const entries = await this._conn.listDir(remotePath);
+    const revision = this._revision;
+    const sessionId = this._conn.sessionId;
+    const entries = await this._conn.listDir(remotePath, sessionId);
+    this._conn.assertSession(sessionId);
     const sorted = entries.sort((a, b) => {
       if (a.isDirectory !== b.isDirectory) {
         return a.isDirectory ? -1 : 1;
       }
       return a.name.localeCompare(b.name);
     });
-    this._dirCache.set(remotePath, sorted);
+    if (revision === this._revision) this._dirCache.set(remotePath, sorted);
     return sorted;
   }
 
@@ -151,8 +155,8 @@ export class RemoteExplorerProvider implements vscode.TreeDataProvider<RemoteExp
   }
 
   // Drag & Drop Implementation
-  async handleDrag(source: readonly RemoteExplorerNode[], dataTransfer: vscode.DataTransfer, token: vscode.CancellationToken): Promise<void> {
-    const urls: string[] = source.map(node => `sftp://${node.remotePath}`);
+  async handleDrag(source: readonly RemoteExplorerNode[], dataTransfer: vscode.DataTransfer, _token: vscode.CancellationToken): Promise<void> {
+    const urls: string[] = source.map(node => this._conn.uri(node.remotePath).toString());
     dataTransfer.set('text/uri-list', new vscode.DataTransferItem(urls.join('\r\n')));
     dataTransfer.set('application/vnd.code.tree.remoteExplorerNode', new vscode.DataTransferItem(source));
   }
@@ -162,6 +166,8 @@ export class RemoteExplorerProvider implements vscode.TreeDataProvider<RemoteExp
     if (!targetDir || this._conn.status !== 'connected') {
       return;
     }
+
+    const sessionId = this._conn.sessionId;
 
     // Handle internal move (drag within the tree)
     const internalDragData = dataTransfer.get('application/vnd.code.tree.remoteExplorerNode');
@@ -175,10 +181,13 @@ export class RemoteExplorerProvider implements vscode.TreeDataProvider<RemoteExp
         },
         async () => {
           for (const node of sourceNodes) {
+            this._conn.assertSession(node.sessionId || sessionId);
+            if (token.isCancellationRequested) throw new vscode.CancellationError();
+            if (node.type === 'connectionRoot' || targetDir.startsWith(node.remotePath + '/')) continue;
             if (node.remotePath === targetDir) continue; // Skip dropping on itself
             const newPath = path.posix.join(targetDir, path.posix.basename(node.remotePath));
             if (node.remotePath !== newPath) {
-              await this._conn.renamePath(node.remotePath, newPath);
+              await this._conn.renamePath(node.remotePath, newPath, sessionId);
             }
           }
         }
@@ -191,33 +200,19 @@ export class RemoteExplorerProvider implements vscode.TreeDataProvider<RemoteExp
     const externalDragData = dataTransfer.get('text/uri-list');
     if (externalDragData) {
       const urlString = await externalDragData.asString();
-      const urls = urlString.split('\r\n').filter(Boolean);
+      const urls = urlString.split(/\r?\n/).filter(line => line && !line.startsWith('#'));
       for (const url of urls) {
         const uri = vscode.Uri.parse(url);
-        if (uri.scheme === 'file') {
-          try {
-            const stat = await vscode.workspace.fs.stat(uri);
-            if (stat.type === vscode.FileType.File) {
-              const fileName = path.basename(uri.path);
-              await vscode.window.withProgress(
-                {
-                  location: vscode.ProgressLocation.Notification,
-                  title: `Uploading ${fileName}...`,
-                  cancellable: false,
-                },
-                async () => {
-                  const data = await vscode.workspace.fs.readFile(uri);
-                  await this._conn.uploadFile(path.posix.join(targetDir, fileName), Buffer.from(data));
-                }
-              );
-              vscode.window.setStatusBarMessage(`$(check) Uploaded ${fileName}`, 3000);
-            } else if (stat.type === vscode.FileType.Directory) {
-              // Basic support for dropping folders: just show a message for now or implement recursive later
-              vscode.window.showInformationMessage('Uploading entire directories via drag & drop is not yet supported. Please drop files individually.');
-            }
-          } catch (err) {
-            console.error(err);
-          }
+        if (uri.scheme !== 'file') continue;
+        try {
+          const fileName = path.posix.basename(uri.path);
+          await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Uploading ${fileName}...`, cancellable: true }, async (_progress, progressToken) => {
+            await uploadLocalEntry(this._conn, uri, path.posix.join(targetDir, fileName), sessionId, progressToken);
+          });
+          vscode.window.setStatusBarMessage(`$(check) Uploaded ${fileName}`, 3000);
+        } catch (error: any) {
+          if (!(error instanceof vscode.CancellationError)) vscode.window.showErrorMessage(`Upload failed: ${error.message || error}`);
+          break;
         }
       }
       this.refresh();

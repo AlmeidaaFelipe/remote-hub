@@ -68,14 +68,15 @@ ext install AlmeidaaFelipe.remote-hub
 
 ### Local Development
 
-To build and run locally:
+Use Node.js 22.13 or later for development and tests. To install the locked dependencies and build locally:
 
 ```bash
-npm install
-npm run compile
+npm ci
+npx playwright install chromium
+npm run build
 ```
 
-Press `F5` in your editor to start an Extension Development Host.
+Press `F5` in your editor to start an Extension Development Host. Run `npm test` before submitting changes.
 
 ## Quick Start
 
@@ -103,14 +104,17 @@ Remote Hub supports multiple authentication methods:
 
 - **Password**: Optionally saved via VS Code's SecretStorage API (OS-level encrypted keychain). When "Save password" is checked, your credentials are stored securely between sessions. Otherwise, the password is only kept in memory for the current session.
 - **Private Key Path**: Connect using a secure private key file. Supports encrypted keys with passphrase prompt.
-- **SSH Agent**: Seamless authentication for SSH/SFTP protocols. Works on Linux, macOS, and Windows (OpenSSH).
+- **SSH Agent**: Authentication for SSH/SFTP protocols using the system agent. Works on Linux, macOS, and Windows (OpenSSH).
+
+On the first SSH/SFTP connection to a host and port, Remote Hub shows a SHA-256 host-key fingerprint and asks for explicit trust. Verify the fingerprint with the server administrator. Matching keys are remembered in extension storage; changed keys block the connection. After verifying a legitimate server-key change, run **Remote Hub: Forget SSH Host Key** from the Command Palette and reconnect. This trust registry is separate from the system `known_hosts` file.
 
 ## Usage
 
 ### Connection Behavior
 
-- Switching to a different server disconnects the current one first.
-- Saved connections are stored securely via `globalState` (without passwords).
+- Switching to a different server disconnects the current one first. Documents, queued operations, watcher events, caches, and diff baselines are bound to a session. Old documents cannot upload to the new connection; reopen them from the current explorer.
+- Up to ten saved connections are stored in `globalState` without passwords. Passwords are stored separately in SecretStorage when requested.
+- Remote operations run sequentially. Recognized connection-loss errors trigger one reconnect attempt and one retry.
 
 ### Explorer Actions
 
@@ -155,7 +159,14 @@ Click the **Search** icon (🔍) in the Remote Explorer title bar, or right-clic
 
 ### Drag & Drop
 
-You can drag and drop files from your computer (e.g., Windows Explorer) directly into the Remote Hub explorer to upload them instantly. A native VS Code progress notification will keep you updated during the upload. You can also drag and drop files *within* the remote tree to move them between folders.
+You can drag and drop files from your computer (e.g., Windows Explorer) directly into the Remote Hub explorer to upload them instantly. A native VS Code progress notification will keep you updated during the upload. You can also drop local folders to upload their contents recursively, including empty directories. Existing files at the destination are overwritten. Transfers run sequentially and can be cancelled between entries. Symbolic links are rejected. Drag files *within* the remote tree to move them between folders; moving a folder into itself or one of its descendants is prevented.
+
+### Remote Compress / Extract
+
+Right-click any file or folder in the Remote Explorer and select **"Compress Here"** to create a `.tar.gz` archive directly on the server — no need to download anything first.
+
+To extract, right-click a `.tar.gz`, `.tgz`, `.zip`, or `.gz` file and select **"Extract Here"**. The contents will be extracted in the same directory on the server.
+*(Note: This feature requires an SSH or SFTP connection. For `.zip` files, `unzip` must be available on the server).*
 
 ### Auto Upload
 
@@ -166,8 +177,20 @@ Remote Hub listens to editor save events and uploads edited remote files automat
 1. Open remote file (`sftp://...`)
 2. Edit in editor
 3. Save (`Ctrl+S` or Auto Save)
-4. A progress notification appears while the upload runs in the background
-5. Status bar confirms completion
+4. The filesystem provider uploads the bytes supplied by the editor and shows a progress notification
+5. Status bar confirms completion; failed uploads fail the save and retain the previous diff baseline
+
+The save listener retains a 700 ms fallback debounce for callers that bypass the filesystem write path. A filesystem-confirmed save skips the fallback upload, avoiding duplicate transfers.
+
+### File Watcher (Local → Remote Sync)
+
+Click the **eye icon** (👁) in the Remote Explorer title bar to start monitoring a local folder. File events inside that folder are synced to the remote server after a 500 ms debounce per path. Starting the watcher does not upload the existing folder contents.
+
+- A status bar item shows which folder is being watched
+- Click the eye icon again (or the status bar) to stop watching
+- The watcher automatically stops when you disconnect
+- A warning dialog is shown before activation, since deletions are also synced
+- No ignore filters are currently applied; choose the monitored folder carefully
 
 ## Internationalization
 
@@ -178,42 +201,93 @@ Remote Hub automatically adapts to your editor's language. Currently supported:
 
 ## Development
 
-**Project structure:**
+The extension uses TypeScript in strict mode and compiles to CommonJS in `out/`. It maintains one active remote connection.
 
-```
+```text
 remote-hub/
 ├── src/
 │   ├── media/
 │   ├── extension.ts
-│   ├── i18n.ts
+│   ├── ConnectionTypes.ts
 │   ├── ConnectionManager.ts
+│   ├── ConnectionStore.ts
+│   ├── SerialQueue.ts
+│   ├── AutoUploadController.ts
+│   ├── HostKeyVerifier.ts
+│   ├── LocalUploader.ts
+│   ├── RemoteUri.ts
+│   ├── RemoteCommands.ts
 │   ├── RemoteExplorerProvider.ts
 │   ├── RemoteFileSystemProvider.ts
-│   └── SftpPanelViewProvider.ts
+│   ├── DiffProvider.ts
+│   ├── FileWatcher.ts
+│   ├── SftpPanelViewProvider.ts
+│   ├── SshConfigParser.ts
+│   └── i18n.ts
+├── tests/
+│   ├── regression.test.cjs
+│   ├── ftp.test.cjs
+│   ├── webview.test.cjs
+│   ├── run-editor.cjs
+│   ├── editor/
+│   └── helpers/
+├── .github/workflows/ci.yml
+├── eslint.config.cjs
 ├── package.nls.json
 ├── package.nls.pt-br.json
 ├── package.json
+├── package-lock.json
+├── tsconfig.json
+├── CHANGELOG.md
 └── README.md
 ```
 
-**Useful scripts:**
+`ConnectionManager` coordinates transport and reconnects. `ConnectionStore` owns persistence; `SerialQueue` orders remote operations; `AutoUploadController` owns save timers; `RemoteCommands` builds escaped shell commands. `HostKeyVerifier` owns SSH trust; `LocalUploader` walks local folders; `RemoteUri` preserves session identity in remote resource URIs. Providers integrate the explorer, documents, diffs, and connection panel with the editor.
 
-```
-npm run compile
-npm run watch
-```
+| Command | Purpose |
+|---------|---------|
+| `npm ci` | Install the dependencies recorded in the lockfile |
+| `npm run build` | Compile TypeScript to `out/` |
+| `npm run compile` | Build the installable VSIX using the local scripts in `tools/` |
+| `npm run watch` | Recompile when source files change |
+| `npm test` | Compile and run regression, real SSH/SFTP/FTP/FTPS, and Chromium webview tests |
+| `npm run lint` | Lint TypeScript, test scripts, and lint configuration |
+| `npm run typecheck` | Check TypeScript without generating output |
+| `npm run test:editor` | Launch an isolated Extension Host and test editor integration |
+| `npm run check` | Run lint, typecheck, tests, and dependency audit |
+| `npm audit` | Check production and development dependency advisories |
+
+The automated suite includes 32 tests. Transport tests use ephemeral localhost SSH/SFTP, FTP, and FTPS servers; external credentials are not required. FTPS verifies a test certificate trusted only by the child test process. Chromium tests exercise the actual webview HTML in English and Portuguese, including saved-connection escaping and connection requests.
+
+`npm run test:editor` separately checks actual editor activation, all contributed commands, sidebar focus, native document saving through the filesystem provider, rename/delete operations, session rejection, and diff resource identity. On Windows it uses the installed VS Code when available. Otherwise it downloads VS Code 1.85.2. Set `VSCODE_EXECUTABLE_PATH` to choose an executable or `VSCODE_TEST_VERSION` to choose a downloaded version. Test profiles and logs live under the ignored `.vscode-test/` directory. Linux needs a display, such as `xvfb-run -a npm run test:editor` in CI.
+
+GitHub Actions runs validation on Windows and Linux with Node.js 22 and 24. The workflow installs the test browser, runs `npm run check`, and tests the Extension Host. Local verification passes; hosted CI execution requires pushing the workflow to GitHub.
+
+Publication scripts still depend on local files under the ignored `tools/` directory. Local analysis documents under `docs/` are ignored by Git and excluded from the distributed extension.
+
+### Current limitations
+
+- One active connection; simultaneous sessions, bookmarks, and bidirectional sync are not implemented.
+- SSH config resolution supports a subset of directives. ProxyJump, Match, Include, and keyboard-interactive/OTP authentication are not implemented.
+- The watcher observes new events rather than uploading existing files at startup, and applies no ignore filters.
+- `stat` uses remote modification time as creation time because the transports do not provide a portable creation timestamp. Remote changes made outside this extension are not polled automatically.
+- Search and archive execution require a POSIX shell and the corresponding tools on the server. Creation produces `.tar.gz`; extraction supports `.tar.gz`, `.tgz`, `.zip`, and `.gz`.
 
 ## Troubleshooting
 
 - If UI actions appear outdated, reload the Extension Host window.
 - If a remote connection drops, Remote Hub attempts automatic reconnect.
 - If reconnect cannot recover, disconnect and connect again from the Connections view.
+- If a private key cannot be read, check its path and permissions. The connection now rejects the failed attempt instead of remaining pending.
+- If a document reports **Connection changed**, reopen it from the current remote explorer. Session changes intentionally block old documents and pending operations.
+- If an SSH key changes, verify the fingerprint with the administrator before using **Forget SSH Host Key**.
+- Search and archive actions require SSH/SFTP and the corresponding server tools: `grep`, `tar`, `unzip`, or `gunzip`.
 
 ## Roadmap
 
-- Drag and drop upload/download
 - Multi-connection simultaneous sessions
-- Better file operation feedback and progress UI
+- Bookmarks / Favorites
+- Bidirectional file sync
 
 ## Links
 

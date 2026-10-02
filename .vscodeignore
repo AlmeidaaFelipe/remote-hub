@@ -9,3 +9,12 @@ tsconfig.json
 node_modules/.bin
 node_modules/typescript
 node_modules/@types
+tests/**
+docs/**
+error.txt
+.github/**
+eslint.config.cjs
+playwright-report/**
+test-results/**
+.env
+.env.*
