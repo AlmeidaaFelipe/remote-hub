@@ -5,6 +5,15 @@ All notable changes to the "Remote Hub" extension will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.9] - 2026-10-02
+
+### Fixed
+
+- Updated both development and marketplace READMEs to describe current save behavior, recursive uploads, session isolation, and SSH host-key trust.
+- Replaced the retired VS Code Marketplace install badge and synchronized both README version badges with the packaged release.
+- Added prepackaging checks for the PNG marketplace icon and Activity Bar icon so missing assets block packaging and publication.
+- Updated local development and publishing documentation to match the current commands and validation coverage.
+
 ## [1.0.8] - 2026-10-02
 
 ### Added

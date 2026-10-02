@@ -27,12 +27,12 @@
   <a href="https://open-vsx.org/extension/AlmeidaaFelipe/remote-hub">
     <img alt="Open VSX Downloads" src="https://img.shields.io/open-vsx/dt/AlmeidaaFelipe/remote-hub?label=Open%20VSX%20Downloads"></a>
   <a href="https://open-vsx.org/extension/AlmeidaaFelipe/remote-hub">
-    <img alt="Open VSX Version" src="https://img.shields.io/badge/Open%20VSX-v1.0.8-blue"></a>
+    <img alt="Open VSX Version" src="https://img.shields.io/badge/Open%20VSX-v1.0.9-blue"></a>
   <br />
   <a href="https://marketplace.visualstudio.com/items?itemName=AlmeidaaFelipe.remote-hub">
-    <img alt="VS Code Marketplace Downloads" src="https://img.shields.io/visual-studio-marketplace/i/AlmeidaaFelipe.remote-hub?label=VS%20Code%20Downloads"></a>
+    <img alt="VS Code Marketplace Installs" src="https://badgen.net/vs-marketplace/i/AlmeidaaFelipe.remote-hub?label=VS%20Code%20Installs"></a>
   <a href="https://marketplace.visualstudio.com/items?itemName=AlmeidaaFelipe.remote-hub">
-    <img alt="VS Code Marketplace Version" src="https://img.shields.io/badge/VS%20Code-v1.0.8-blue"></a>
+    <img alt="VS Code Marketplace Version" src="https://img.shields.io/badge/VS%20Code-v1.0.9-blue"></a>
   <br />
   <a href="https://github.com/AlmeidaaFelipe/remote-hub">
     <img alt="GitHub" src="https://img.shields.io/badge/GitHub-Repository-181717?logo=github"></a>
@@ -263,7 +263,7 @@ The automated suite includes 32 tests. Transport tests use ephemeral localhost S
 
 GitHub Actions runs validation on Windows and Linux with Node.js 22 and 24. The workflow installs the test browser, runs `npm run check`, and tests the Extension Host. Local verification passes; hosted CI execution requires pushing the workflow to GitHub.
 
-Publication scripts still depend on local files under the ignored `tools/` directory. Local analysis documents under `docs/` are ignored by Git and excluded from the distributed extension.
+Publication scripts depend on local files under the ignored `tools/` directory. `npm run compile` synchronizes version badges in both READMEs, validates the PNG marketplace icon and Activity Bar asset, then packages `tools/README.md` and restores this development README. `npm run pub` loads credentials from `tools/.env`; existing environment variables take precedence. Local analysis documents under `docs/` are ignored by Git and excluded from the distributed extension.
 
 ### Current limitations
 
