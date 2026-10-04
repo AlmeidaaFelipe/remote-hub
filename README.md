@@ -27,12 +27,12 @@
   <a href="https://open-vsx.org/extension/AlmeidaaFelipe/remote-hub">
     <img alt="Open VSX Downloads" src="https://img.shields.io/open-vsx/dt/AlmeidaaFelipe/remote-hub?label=Open%20VSX%20Downloads"></a>
   <a href="https://open-vsx.org/extension/AlmeidaaFelipe/remote-hub">
-    <img alt="Open VSX Version" src="https://img.shields.io/badge/Open%20VSX-v1.0.9-blue"></a>
+    <img alt="Open VSX Version" src="https://img.shields.io/badge/Open%20VSX-v1.1.0-blue"></a>
   <br />
   <a href="https://marketplace.visualstudio.com/items?itemName=AlmeidaaFelipe.remote-hub">
     <img alt="VS Code Marketplace Installs" src="https://badgen.net/vs-marketplace/i/AlmeidaaFelipe.remote-hub?label=VS%20Code%20Installs"></a>
   <a href="https://marketplace.visualstudio.com/items?itemName=AlmeidaaFelipe.remote-hub">
-    <img alt="VS Code Marketplace Version" src="https://img.shields.io/badge/VS%20Code-v1.0.9-blue"></a>
+    <img alt="VS Code Marketplace Version" src="https://img.shields.io/badge/VS%20Code-v1.1.0-blue"></a>
   <br />
   <a href="https://github.com/AlmeidaaFelipe/remote-hub">
     <img alt="GitHub" src="https://img.shields.io/badge/GitHub-Repository-181717?logo=github"></a>
@@ -40,10 +40,31 @@
 
 ## Import and Export Connections
 
-Use **Remote Hub: Export Connections** or **Remote Hub: Import Connections** from the Command Palette or the Connections view toolbar.
-Exports use the Remote Hub JSON format (version 1). Passwords are excluded by default. Choose **Include saved passwords** to export passwords from secure storage in plain text; protect the exported file. Private key contents are excluded; private key paths are retained and may need adjusting on another machine.
-During import, choose whether to ignore passwords (the default) or save them in the editor's secure storage. Passwords are never saved in connection metadata. Duplicate labels are skipped together with their passwords.
-Imports preserve existing connections and skip duplicate labels. The entire file is validated before saving. Imports exceeding the limit of 10 saved connections are rejected without changing the saved list.
+Transfer saved connections between editors or keep a backup using the Remote Hub JSON format (version 1).
+Open the Command Palette (`Ctrl+Shift+P`, or `Cmd+Shift+P` on macOS) to run the commands below. Both commands are also available in the **Connections** view toolbar.
+
+### Export connections
+
+1. Save at least one connection by connecting successfully. To export its password later, enable **Save password** when connecting.
+2. Run **Remote Hub: Export Connections**.
+3. Choose **Without passwords (default)** or **Include saved passwords**.
+4. Choose a destination for `remote-hub-connections.json` and save the file.
+
+The export contains all saved connections. **Include saved passwords** only includes available passwords stored with **Save password** enabled. Passwords used only for the current session are not exported. Private key files and SSH host-key trust records are not included; private key paths are retained.
+
+**Security:** Included passwords are written in plain text, without encryption. Keep the exported file private and delete it when no longer needed.
+
+### Import connections
+
+1. Run **Remote Hub: Import Connections** in the destination editor.
+2. Select a JSON file exported by Remote Hub.
+3. Choose **Without passwords (default)** to ignore passwords in the file, or **Import passwords into secure storage** to save them in the editor's SecretStorage.
+4. Check the notification for the number of imported connections and skipped duplicate labels. Imported connections appear in **Connections**.
+5. Select a connection to use it. Enter its password if it was not imported, and adjust any private key path for the destination machine. Verify the SSH host-key fingerprint when prompted.
+
+Existing connections are preserved. Matching labels are skipped, including their passwords; importing does not replace them. Duplicate labels within the file are also skipped after the first occurrence. The full document is validated before saving. If new connections would exceed the limit of **10 saved connections**, the import is rejected without changing the saved list. Cancelling either dialog leaves saved connections unchanged.
+
+Passwords selected for import are stored separately from connection metadata. Files exported without passwords remain supported, and importing never connects to a server automatically. Only the Remote Hub format is supported; JSON files from other extensions must be converted first.
 
 ## Installation
 
@@ -233,6 +254,7 @@ remote-hub/
 │   └── i18n.ts
 ├── tests/
 │   ├── regression.test.cjs
+│   ├── connection-transfer.test.cjs
 │   ├── ftp.test.cjs
 │   ├── webview.test.cjs
 │   ├── run-editor.cjs
@@ -249,7 +271,7 @@ remote-hub/
 └── README.md
 ```
 
-`ConnectionManager` coordinates transport and reconnects. `ConnectionStore` owns persistence; `SerialQueue` orders remote operations; `AutoUploadController` owns save timers; `RemoteCommands` builds escaped shell commands. `HostKeyVerifier` owns SSH trust; `LocalUploader` walks local folders; `RemoteUri` preserves session identity in remote resource URIs. Providers integrate the explorer, documents, diffs, and connection panel with the editor.
+`ConnectionManager` coordinates transport and reconnects. `ConnectionStore` owns persistence and JSON import/export with optional passwords; `SerialQueue` orders remote operations; `AutoUploadController` owns save timers; `RemoteCommands` builds escaped shell commands. `HostKeyVerifier` owns SSH trust; `LocalUploader` walks local folders; `RemoteUri` preserves session identity in remote resource URIs. Providers integrate the explorer, documents, diffs, and connection panel with the editor.
 
 | Command | Purpose |
 |---------|---------|
@@ -264,7 +286,7 @@ remote-hub/
 | `npm run check` | Run lint, typecheck, tests, and dependency audit |
 | `npm audit` | Check production and development dependency advisories |
 
-The automated suite includes 32 tests. Transport tests use ephemeral localhost SSH/SFTP, FTP, and FTPS servers; external credentials are not required. FTPS verifies a test certificate trusted only by the child test process. Chromium tests exercise the actual webview HTML in English and Portuguese, including saved-connection escaping and connection requests.
+The automated suite includes 38 tests, including connection transfer with optional passwords, full-file validation, duplicate labels, capacity limits, and credential rollback after a failed metadata write. Transport tests use ephemeral localhost SSH/SFTP, FTP, and FTPS servers; external credentials are not required. FTPS verifies a test certificate trusted only by the child test process. Chromium tests exercise the actual webview HTML in English and Portuguese, including saved-connection escaping and connection requests.
 
 `npm run test:editor` separately checks actual editor activation, all contributed commands, sidebar focus, native document saving through the filesystem provider, rename/delete operations, session rejection, and diff resource identity. On Windows it uses the installed VS Code when available. Otherwise it downloads VS Code 1.85.2. Set `VSCODE_EXECUTABLE_PATH` to choose an executable or `VSCODE_TEST_VERSION` to choose a downloaded version. Test profiles and logs live under the ignored `.vscode-test/` directory. Linux needs a display, such as `xvfb-run -a npm run test:editor` in CI.
 

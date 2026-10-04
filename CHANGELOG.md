@@ -5,6 +5,21 @@ All notable changes to the "Remote Hub" extension will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-10-04
+
+### Added
+
+- Import and export saved connections as Remote Hub JSON files from the Command Palette or Connections view toolbar.
+- Optional export of saved passwords, excluded by default, with a warning that the exported JSON contains passwords in plain text.
+- Optional import of passwords into the editor's secure storage, keeping passwords out of saved connection metadata.
+- Connection transfer tests covering password inclusion, invalid files, duplicate labels, the ten-connection limit, and credential restoration after a failed metadata write.
+
+### Changed
+
+- Imports preserve existing connections and skip duplicate labels and their passwords. Invalid files or imports exceeding ten saved connections are rejected before saving.
+- Updated repository and marketplace READMEs with step-by-step import/export instructions, password handling, private key path portability, and format compatibility.
+- Synchronized extension and lockfile versions and README badges at 1.1.0.
+
 ## [1.0.9] - 2026-10-02
 
 ### Fixed
