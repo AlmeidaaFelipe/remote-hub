@@ -5,6 +5,11 @@ interface Dictionary {
 }
 
 const en: Dictionary = {
+    'connections.withoutPasswords': 'Without passwords (default)',
+    'connections.withPasswords': 'Include saved passwords',
+    'connections.passwordWarning': 'Passwords will be written in plain text. Keep the exported file secure.',
+    'connections.importPasswords': 'Import passwords into secure storage',
+    'connections.exportedPasswords': 'Connections exported with saved passwords in plain text. Keep this file secure.',
     'connections.import': 'Import Connections',
     'connections.export': 'Export Connections',
     'connections.empty': 'No saved connections to export.',
@@ -97,6 +102,11 @@ const en: Dictionary = {
 };
 
 const pt: Dictionary = {
+    'connections.withoutPasswords': 'Sem senhas (padrão)',
+    'connections.withPasswords': 'Incluir senhas salvas',
+    'connections.passwordWarning': 'As senhas serão gravadas em texto simples. Proteja o arquivo exportado.',
+    'connections.importPasswords': 'Importar senhas para armazenamento seguro',
+    'connections.exportedPasswords': 'Conexões exportadas com senhas salvas em texto simples. Proteja este arquivo.',
     'connections.import': 'Importar Conexões',
     'connections.export': 'Exportar Conexões',
     'connections.empty': 'Nenhuma conexão salva para exportar.',

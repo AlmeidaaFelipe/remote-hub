@@ -41,7 +41,8 @@
 ## Import and Export Connections
 
 Use **Remote Hub: Export Connections** or **Remote Hub: Import Connections** from the Command Palette or the Connections view toolbar.
-Exports use the Remote Hub JSON format (version 1). Passwords and private key contents are excluded; private key paths are retained and may need adjusting on another machine.
+Exports use the Remote Hub JSON format (version 1). Passwords are excluded by default. Choose **Include saved passwords** to export passwords from secure storage in plain text; protect the exported file. Private key contents are excluded; private key paths are retained and may need adjusting on another machine.
+During import, choose whether to ignore passwords (the default) or save them in the editor's secure storage. Passwords are never saved in connection metadata. Duplicate labels are skipped together with their passwords.
 Imports preserve existing connections and skip duplicate labels. The entire file is validated before saving. Imports exceeding the limit of 10 saved connections are rejected without changing the saved list.
 
 ## Installation

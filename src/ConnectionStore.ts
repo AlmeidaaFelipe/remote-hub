@@ -12,32 +12,65 @@ export class ConnectionStore {
     return this._state.get<ConnectionConfig[]>('savedConnections', []);
   }
 
-  exportConnections(): string {
+  async exportConnections(includePasswords = false): Promise<string> {
+    const connections = await Promise.all(this.getSavedConnections().map(async connection => {
+      const portable = this._portableConnection(connection);
+      if (includePasswords && connection.authType === 'password' && connection.savePassword) {
+        const password = await this.getStoredPassword(connection);
+        if (password) { portable.password = password; portable.savePassword = true; }
+      }
+      return portable;
+    }));
     return JSON.stringify({
       format: 'remote-hub', version: 1,
-      connections: this.getSavedConnections().map(connection => this._portableConnection(connection)),
+      connections,
     }, null, 2) + '\n';
   }
 
-  async importConnections(json: string): Promise<{ imported: number; skipped: number }> {
+  async importConnections(json: string, includePasswords = false): Promise<{ imported: number; skipped: number }> {
     const document = JSON.parse(json.replace(/^\uFEFF/, ''));
     if (!document || document.format !== 'remote-hub' || document.version !== 1 || !Array.isArray(document.connections)) {
       throw new Error('Expected a Remote Hub connections file (version 1).');
     }
     // Validate the complete document before changing saved metadata.
-    const incoming = document.connections.map((value: unknown) => this._portableConnection(value));
+    const incoming = document.connections.map((value: unknown) => {
+      const portable = this._portableConnection(value);
+      const password = (value as ConnectionConfig).password;
+      if (password !== undefined && typeof password !== 'string') throw new Error('Invalid connection password.');
+      if (includePasswords && portable.authType === 'password' && password) portable.password = password;
+      return portable;
+    });
     const saved = [...this.getSavedConnections()];
     const labels = new Set(saved.map(connection => connection.label));
     let imported = 0;
     let skipped = 0;
+    const credentials = new Map<string, string>();
     for (const connection of incoming) {
       if (labels.has(connection.label)) { skipped++; continue; }
       labels.add(connection.label);
+      if (connection.password) {
+        credentials.set(this._makeSecretKey(connection), connection.password);
+        connection.savePassword = true;
+        delete connection.password;
+      }
       saved.push(connection);
       imported++;
     }
     if (saved.length > 10) throw new Error('Import exceeds the limit of 10 saved connections.');
-    if (imported) await this._state.update('savedConnections', saved);
+    const previous = new Map<string, string | undefined>();
+    try {
+      for (const [key, password] of credentials) {
+        previous.set(key, await this._secrets.get(key));
+        await this._secrets.store(key, password);
+      }
+      if (imported) await this._state.update('savedConnections', saved);
+    } catch (error) {
+      for (const [key, password] of previous) {
+        if (password === undefined) await this._secrets.delete(key);
+        else await this._secrets.store(key, password);
+      }
+      throw error;
+    }
     return { imported, skipped };
   }
 

@@ -85,14 +85,19 @@ export function activate(context: vscode.ExtensionContext) {
           await vscode.window.showInformationMessage(t('connections.empty'));
           return;
         }
+        const choice = await vscode.window.showQuickPick([
+          { label: t('connections.withoutPasswords'), includePasswords: false },
+          { label: t('connections.withPasswords'), description: t('connections.passwordWarning'), includePasswords: true },
+        ], { title: t('connections.export') });
+        if (!choice) return;
         const uri = await vscode.window.showSaveDialog({
           title: t('connections.export'), saveLabel: t('connections.export'),
           defaultUri: vscode.Uri.file(path.join(homedir(), 'remote-hub-connections.json')),
           filters: { JSON: ['json'] },
         });
         if (!uri) return;
-        await vscode.workspace.fs.writeFile(uri, Buffer.from(connectionManager.exportConnections(), 'utf8'));
-        await vscode.window.showInformationMessage(t('connections.exported'));
+        await vscode.workspace.fs.writeFile(uri, Buffer.from(await connectionManager.exportConnections(choice.includePasswords), 'utf8'));
+        await vscode.window.showInformationMessage(t(choice.includePasswords ? 'connections.exportedPasswords' : 'connections.exported'));
       } catch (error) {
         await vscode.window.showErrorMessage(t('connections.error', error instanceof Error ? error.message : String(error)));
       }
@@ -106,7 +111,12 @@ export function activate(context: vscode.ExtensionContext) {
         });
         if (!uris?.length) return;
         const bytes = await vscode.workspace.fs.readFile(uris[0]);
-        const result = await connectionManager.importConnections(Buffer.from(bytes).toString('utf8'));
+        const choice = await vscode.window.showQuickPick([
+          { label: t('connections.withoutPasswords'), includePasswords: false },
+          { label: t('connections.importPasswords'), includePasswords: true },
+        ], { title: t('connections.import') });
+        if (!choice) return;
+        const result = await connectionManager.importConnections(Buffer.from(bytes).toString('utf8'), choice.includePasswords);
         provider.refreshSavedConnections();
         await vscode.window.showInformationMessage(t('connections.imported', result.imported, result.skipped));
       } catch (error) {
