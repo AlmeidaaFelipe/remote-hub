@@ -60,6 +60,12 @@ export class ConnectionManager {
     await this._store.saveConnection(config);
   }
 
+  exportConnections(): string { return this._store.exportConnections(); }
+
+  async importConnections(json: string): Promise<{ imported: number; skipped: number }> {
+    return this._store.importConnections(json);
+  }
+
   async deleteConnection(label: string): Promise<void> {
     await this._store.deleteConnection(label);
   }

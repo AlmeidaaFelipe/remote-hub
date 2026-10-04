@@ -63,6 +63,16 @@
     },
     "commands": [
       {
+        "command": "sftpPanel.importConnections",
+        "title": "%remotehub.command.importConnections%",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "sftpPanel.exportConnections",
+        "title": "%remotehub.command.exportConnections%",
+        "icon": "$(cloud-upload)"
+      },
+      {
         "command": "sftpPanel.connect",
         "title": "%remotehub.command.connect%"
       },
@@ -157,6 +167,16 @@
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "sftpPanel.importConnections",
+          "when": "view == sftpPanel.mainView",
+          "group": "navigation@3"
+        },
+        {
+          "command": "sftpPanel.exportConnections",
+          "when": "view == sftpPanel.mainView",
+          "group": "navigation@4"
+        },
         {
           "command": "sftpPanel.goToConnections",
           "when": "view == sftpPanel.explorerView",

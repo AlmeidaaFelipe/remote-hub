@@ -5,6 +5,12 @@ interface Dictionary {
 }
 
 const en: Dictionary = {
+    'connections.import': 'Import Connections',
+    'connections.export': 'Export Connections',
+    'connections.empty': 'No saved connections to export.',
+    'connections.exported': 'Connections exported without passwords. Private key files are not included.',
+    'connections.imported': 'Imported {0} connections. Skipped {1} duplicate labels.',
+    'connections.error': 'Connection transfer failed: {0}',
     'ssh.trust': 'Trust and connect',
     'ssh.trustPrompt': 'Unknown SSH host {0}:{1}. Fingerprint: {2}. Verify this fingerprint with the server administrator before trusting it.',
     'ssh.keyChanged': 'SSH host key changed for {0}:{1}. Connection blocked. Received fingerprint: {2}. Verify the change before using Forget SSH Host Key.',
@@ -91,6 +97,12 @@ const en: Dictionary = {
 };
 
 const pt: Dictionary = {
+    'connections.import': 'Importar Conexões',
+    'connections.export': 'Exportar Conexões',
+    'connections.empty': 'Nenhuma conexão salva para exportar.',
+    'connections.exported': 'Conexões exportadas sem senhas. Arquivos de chave privada não são incluídos.',
+    'connections.imported': '{0} conexões importadas. {1} nomes repetidos ignorados.',
+    'connections.error': 'Falha na transferência de conexões: {0}',
     'ssh.trust': 'Confiar e conectar',
     'ssh.trustPrompt': 'Servidor SSH desconhecido {0}:{1}. Impressão digital: {2}. Verifique esta impressão com o administrador antes de confiar.',
     'ssh.keyChanged': 'Chave SSH alterada para {0}:{1}. Conexão bloqueada. Impressão recebida: {2}. Verifique a alteração antes de usar Esquecer chave SSH.',

@@ -1,4 +1,6 @@
 {
+  "remotehub.command.importConnections": "Remote Hub: Import Connections",
+  "remotehub.command.exportConnections": "Remote Hub: Export Connections",
   "remotehub.displayName": "Remote Hub",
   "remotehub.description": "Connect to remote servers via SSH, SFTP, FTP or FTPS and edit files directly",
   "remotehub.view.main": "Remote Hub",

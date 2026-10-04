@@ -38,6 +38,12 @@
     <img alt="GitHub" src="https://img.shields.io/badge/GitHub-Repository-181717?logo=github"></a>
 </p>
 
+## Import and Export Connections
+
+Use **Remote Hub: Export Connections** or **Remote Hub: Import Connections** from the Command Palette or the Connections view toolbar.
+Exports use the Remote Hub JSON format (version 1). Passwords and private key contents are excluded; private key paths are retained and may need adjusting on another machine.
+Imports preserve existing connections and skip duplicate labels. The entire file is validated before saving. Imports exceeding the limit of 10 saved connections are rejected without changing the saved list.
+
 ## Installation
 
 ### Open VSX (Google Antigravity & VS Codium)

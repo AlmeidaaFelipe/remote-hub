@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { homedir } from 'os';
 import { SftpPanelViewProvider } from './SftpPanelViewProvider';
 import { RemoteFileSystemProvider } from './RemoteFileSystemProvider';
 import { ConnectionManager } from './ConnectionManager';
@@ -78,6 +79,40 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Commands
   context.subscriptions.push(
+    vscode.commands.registerCommand('sftpPanel.exportConnections', async () => {
+      try {
+        if (!connectionManager.getSavedConnections().length) {
+          await vscode.window.showInformationMessage(t('connections.empty'));
+          return;
+        }
+        const uri = await vscode.window.showSaveDialog({
+          title: t('connections.export'), saveLabel: t('connections.export'),
+          defaultUri: vscode.Uri.file(path.join(homedir(), 'remote-hub-connections.json')),
+          filters: { JSON: ['json'] },
+        });
+        if (!uri) return;
+        await vscode.workspace.fs.writeFile(uri, Buffer.from(connectionManager.exportConnections(), 'utf8'));
+        await vscode.window.showInformationMessage(t('connections.exported'));
+      } catch (error) {
+        await vscode.window.showErrorMessage(t('connections.error', error instanceof Error ? error.message : String(error)));
+      }
+    }),
+    vscode.commands.registerCommand('sftpPanel.importConnections', async () => {
+      try {
+        const uris = await vscode.window.showOpenDialog({
+          title: t('connections.import'), openLabel: t('connections.import'),
+          canSelectFiles: true, canSelectFolders: false, canSelectMany: false,
+          filters: { JSON: ['json'] },
+        });
+        if (!uris?.length) return;
+        const bytes = await vscode.workspace.fs.readFile(uris[0]);
+        const result = await connectionManager.importConnections(Buffer.from(bytes).toString('utf8'));
+        provider.refreshSavedConnections();
+        await vscode.window.showInformationMessage(t('connections.imported', result.imported, result.skipped));
+      } catch (error) {
+        await vscode.window.showErrorMessage(t('connections.error', error instanceof Error ? error.message : String(error)));
+      }
+    }),
     vscode.commands.registerCommand('sftpPanel.forgetSshHostKey', () => connectionManager.forgetSshHostKey()),
     vscode.commands.registerCommand('sftpPanel.connect', () => {
       setCtx('sftpPanel.showConnections', true);
